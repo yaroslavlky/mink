@@ -48,6 +48,7 @@ export interface Mink {
   services(): ServiceInfo[];
   stopService(instance: string, force?: boolean): Promise<void>;
   restartService(instance: string): Promise<RunResult>;
+  scaleService(id: string, count: number): Promise<ServiceInfo[]>;
   state(): Promise<LocalState>;
   settings(): Promise<Settings>;
   updateSettings(change: Partial<Settings>): Promise<Settings>;
@@ -142,7 +143,10 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
             throw new Error('Passthrough arguments require a command, not a pipeline');
           plan.prepared.args.push(...runOptions.args);
         }
-        const executed = await session.run(plan, { ...runOptions, cache });
+        const replicas = plan.entry?.run?.mode === 'service' ? (plan.entry.run.replicas ?? 1) : 1;
+        let executed = await session.run(plan, { ...runOptions, cache });
+        for (let replica = 1; replica < replicas; replica++)
+          executed = await session.run(structuredClone(plan), { ...runOptions, cache });
         const result = runOptions.retryFailed
           ? mergeRetryResult(runOptions.retryFailed, executed)
           : executed;
@@ -231,16 +235,45 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
     untrust: () => trust.untrust(),
     trustStatus: () => trust.status(),
     services: () =>
-      session.services().map(({ instance, id, state, started, url, completion }) => ({
-        instance,
-        id,
-        state,
-        started,
-        url,
-        completion,
-      })),
+      session
+        .services()
+        .map(({ instance, id, state, started, url, completion, restarts, healthHistory }) => ({
+          instance,
+          id,
+          state,
+          started,
+          url,
+          completion,
+          restarts,
+          healthHistory: structuredClone(healthHistory),
+        })),
     stopService: (id, force) => session.stop(id, force),
     restartService: (id) => session.restart(id),
+    async scaleService(id, count) {
+      if (!Number.isInteger(count) || count < 0 || count > 128)
+        throw new Error('Replica count must be an integer from 0 to 128');
+      const active = session.services().filter((service) => service.id === id);
+      for (const service of active.slice(count)) await session.stop(service.instance);
+      for (let replica = active.length; replica < count; replica++) {
+        const plan = makePlan(id);
+        if (plan.entry?.run?.mode !== 'service') throw new Error(`${id} is not a service`);
+        plan.entry.run.replicas = count;
+        await session.run(plan, { cache });
+      }
+      return session
+        .services()
+        .filter((service) => service.id === id)
+        .map(({ instance, id, state, started, url, completion, restarts, healthHistory }) => ({
+          instance,
+          id,
+          state,
+          started,
+          url,
+          completion,
+          restarts,
+          healthHistory: structuredClone(healthHistory),
+        }));
+    },
     async dispose() {
       await session.dispose();
       await Promise.allSettled([...pendingRuns]);
@@ -340,6 +373,8 @@ export type { ShellName } from './shell.js';
 export { upgradeMink } from './upgrade.js';
 export { GlobalConfigStore } from './storage.js';
 export type { GlobalConfig } from './storage.js';
+export { SupervisorServer, SupervisorClient, supervisorEndpoint } from './runtime/supervisor.js';
+export type { SupervisorRequest, SupervisorResponse } from './runtime/supervisor.js';
 export {
   resolveValues,
   parseParameter,

@@ -26,7 +26,7 @@ export class Session {
   private processes = new Map<string, ProcessHandle>();
   private listeners = new Set<(event: RunEvent) => void>();
   private controllers = new Set<AbortController>();
-  private reservedServices = new Set<string>();
+  private reservedServices = new Map<string, number>();
   private locks = new Map<string, Slots>();
   private runningRoots = new Set<string>();
   private disposed = false;
@@ -48,20 +48,22 @@ export class Session {
   };
   async run(root: ExecutionPlan, options: SessionOptions = {}): Promise<RunResult> {
     if (this.disposed) throw new Error('Mink session is disposed');
-    if (root.entry && this.runningRoots.has(root.id))
+    if (root.entry && root.entry.run?.mode !== 'service' && this.runningRoots.has(root.id))
       throw new Error(`Command ${root.id} is already running`);
-    const serviceIds = new Set(
-      this.services()
-        .filter((p) => ['ready', 'unhealthy', 'starting', 'stopping'].includes(p.state))
-        .map((p) => p.id),
-    );
-    for (const id of this.reservedServices) serviceIds.add(id);
+    const serviceCounts = new Map<string, number>();
+    for (const service of this.services().filter((p) =>
+      ['ready', 'unhealthy', 'starting', 'stopping'].includes(p.state),
+    ))
+      serviceCounts.set(service.id, (serviceCounts.get(service.id) ?? 0) + 1);
+    for (const [id, count] of this.reservedServices)
+      serviceCounts.set(id, (serviceCounts.get(id) ?? 0) + count);
     const reservations: string[] = [];
     const inspect = (plan: ExecutionPlan): void => {
       if (plan.entry?.run?.mode === 'service') {
-        if (serviceIds.has(plan.id))
+        const count = serviceCounts.get(plan.id) ?? 0;
+        if (count >= (plan.entry.run.replicas ?? 1))
           throw new Error(`Service ${plan.id} is already scheduled or running; use restart`);
-        serviceIds.add(plan.id);
+        serviceCounts.set(plan.id, count + 1);
         reservations.push(plan.id);
       }
       for (const p of plan.dependencies) inspect(p);
@@ -69,7 +71,8 @@ export class Session {
     };
     inspect(root);
     if (root.entry) this.runningRoots.add(root.id);
-    for (const id of reservations) this.reservedServices.add(id);
+    for (const id of reservations)
+      this.reservedServices.set(id, (this.reservedServices.get(id) ?? 0) + 1);
     const started = Date.now(),
       runId = randomUUID(),
       controller = new AbortController();
@@ -190,11 +193,18 @@ export class Session {
           ]),
         };
       }
-      for (const dep of plan.dependencies) {
+      for (const [index, dep] of plan.dependencies.entries()) {
         if (!dependencyRuns.has(dep.key))
           dependencyRuns.set(dep.key, execute(dep, dependencySignal));
         const result = await untilCancelled(dependencyRuns.get(dep.key)!, scope);
-        if (!successful(result))
+        const rule = plan.dependencyRules[index];
+        const accepted =
+          rule.condition === 'failed'
+            ? result.state === 'failed'
+            : rule.condition === 'completed_successfully'
+              ? result.state === 'succeeded'
+              : successful(result);
+        if (!accepted && !rule.optional)
           return { ...result, state: scope.aborted ? 'cancelled' : 'failed' };
       }
       if (plan.policy === 'once') {
@@ -297,7 +307,11 @@ export class Session {
     } finally {
       dependencyController.abort();
       // Services retain their controller until session disposal.
-      for (const id of reservations) this.reservedServices.delete(id);
+      for (const id of reservations) {
+        const count = (this.reservedServices.get(id) ?? 1) - 1;
+        if (count) this.reservedServices.set(id, count);
+        else this.reservedServices.delete(id);
+      }
       if (root.entry) this.runningRoots.delete(root.id);
       const live = this.services().filter(
         (p) =>

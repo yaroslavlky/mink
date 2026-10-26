@@ -22,7 +22,10 @@ export interface LintIssue {
 export function lintConfig(config: MinkConfiguration): LintIssue[] {
   const referenced = new Set<string>();
   for (const entry of Object.values(config.commands)) {
-    if (entry.kind === 'command') entry.depends_on?.forEach((id) => referenced.add(id));
+    if (entry.kind === 'command')
+      entry.depends_on?.forEach((dependency) =>
+        referenced.add(typeof dependency === 'string' ? dependency : dependency.id),
+      );
     else Object.values(entry.steps).forEach((step) => referenced.add(step.uses));
   }
   return Object.entries(config.commands)

@@ -136,6 +136,24 @@
       },
       "additionalProperties": false
     },
+    "dependency": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "condition": {
+              "enum": ["started", "healthy", "completed_successfully", "failed"]
+            },
+            "optional": { "type": "boolean" },
+            "if": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "parameter": {
       "type": "object",
       "required": ["type"],
@@ -380,7 +398,7 @@
           "type": "object",
           "properties": {
             "type": {
-              "enum": ["process", "tcp", "http"]
+              "enum": ["process", "tcp", "http", "command", "log", "file"]
             },
             "port": {
               "type": "integer",
@@ -398,7 +416,10 @@
             "interval_ms": {
               "type": "integer",
               "minimum": 10
-            }
+            },
+            "command": { "type": "string", "minLength": 1 },
+            "log_line": { "type": "string", "minLength": 1 },
+            "file": { "type": "string", "minLength": 1 }
           },
           "required": ["type"],
           "additionalProperties": false,
@@ -426,6 +447,18 @@
               "then": {
                 "required": ["url"]
               }
+            },
+            {
+              "if": { "properties": { "type": { "const": "command" } } },
+              "then": { "required": ["command"] }
+            },
+            {
+              "if": { "properties": { "type": { "const": "log" } } },
+              "then": { "required": ["log_line"] }
+            },
+            {
+              "if": { "properties": { "type": { "const": "file" } } },
+              "then": { "required": ["file"] }
             }
           ]
         },
@@ -433,7 +466,7 @@
           "type": "object",
           "properties": {
             "type": {
-              "enum": ["tcp", "http"]
+              "enum": ["process", "tcp", "http", "command", "log", "file"]
             },
             "port": {
               "type": "integer",
@@ -456,7 +489,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
-            }
+            },
+            "command": { "type": "string", "minLength": 1 },
+            "log_line": { "type": "string", "minLength": 1 },
+            "file": { "type": "string", "minLength": 1 }
           },
           "required": ["type"],
           "additionalProperties": false,
@@ -484,13 +520,25 @@
               "then": {
                 "required": ["url"]
               }
+            },
+            {
+              "if": { "properties": { "type": { "const": "command" } } },
+              "then": { "required": ["command"] }
+            },
+            {
+              "if": { "properties": { "type": { "const": "log" } } },
+              "then": { "required": ["log_line"] }
+            },
+            {
+              "if": { "properties": { "type": { "const": "file" } } },
+              "then": { "required": ["file"] }
             }
           ]
         },
         "restart": {
           "type": "object",
-          "required": ["max_attempts"],
           "properties": {
+            "policy": { "enum": ["always", "on_failure", "never", "exit_on_failure"] },
             "max_attempts": {
               "type": "integer",
               "minimum": 0,
@@ -506,6 +554,36 @@
               "minimum": 1,
               "maximum": 8
             }
+          },
+          "additionalProperties": false
+        },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "ready_log_line": { "type": "string", "minLength": 1 },
+        "shutdown": {
+          "type": "object",
+          "properties": {
+            "signal": { "type": "string", "minLength": 1 },
+            "timeout_ms": { "type": "integer", "minimum": 1 },
+            "command": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "schedule": {
+          "type": "object",
+          "properties": {
+            "cron": { "type": "string", "minLength": 1 },
+            "interval_ms": { "type": "integer", "minimum": 100 }
+          },
+          "oneOf": [{ "required": ["cron"] }, { "required": ["interval_ms"] }],
+          "additionalProperties": false
+        },
+        "disabled": { "type": "boolean" },
+        "notify": {
+          "type": "object",
+          "properties": {
+            "desktop": { "type": "boolean" },
+            "webhook": { "type": "string", "pattern": "^https?://" },
+            "after_ms": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": false
         },
@@ -558,10 +636,7 @@
         "depends_on": {
           "type": "array",
           "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
+          "items": { "$ref": "#/$defs/dependency" }
         },
         "params": {
           "$ref": "#/$defs/params"

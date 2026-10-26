@@ -19,6 +19,13 @@ title: CLI and palette
 | `mink why <id> [--json]`      | Explain a cache hit, miss, or ineligibility           |
 | `mink cache ls/clear/prune`   | Manage local cached command results                   |
 | `mink trust` / `mink untrust` | Record or remove the current config hash              |
+| `mink run <id> -D`            | Run through the persistent project supervisor         |
+| `mink attach` / `detach`      | Inspect or leave the supervisor                       |
+| `mink stop --all`             | Stop all supervised services                          |
+| `mink scale <id> <n>`         | Change a service replica count                        |
+| `mink logs <id> -f --since`   | Read supervised logs                                  |
+| `mink events`                 | Stream redacted JSONL runtime events                  |
+| `mink runs ls/show/replay`    | Inspect numbered run history                          |
 | `mink graph`                  | Print text, JSON, DOT, or Mermaid dependency graphs   |
 | `mink env <id>`               | Print the resolved environment with masking           |
 | `mink fmt` / `mink lint`      | Format and statically inspect `mink.yml`              |

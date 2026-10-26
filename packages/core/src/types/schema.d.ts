@@ -12,7 +12,7 @@ export type Command = {
   description?: string;
   command?: string;
   source?: Source;
-  depends_on?: string[];
+  depends_on?: Dependency[];
   params?: Params;
   run?: Run;
   presets?: {
@@ -64,6 +64,14 @@ export type Source = {
 export type Source1 = {
   [k: string]: unknown;
 };
+export type Dependency =
+  | string
+  | {
+      id: string;
+      condition?: "started" | "healthy" | "completed_successfully" | "failed";
+      optional?: boolean;
+      if?: string;
+    };
 export type CommandParameter = Parameter;
 export type Parameter = {
   type: "string" | "boolean" | "number" | "select" | "port" | "path" | "secret";
@@ -148,24 +156,50 @@ export interface Run {
   timeout_ms?: number;
   startup_timeout_ms?: number;
   ready?: {
-    type: "process" | "tcp" | "http";
+    type: "process" | "tcp" | "http" | "command" | "log" | "file";
     port?: number;
     host?: string;
     url?: string;
     interval_ms?: number;
+    command?: string;
+    log_line?: string;
+    file?: string;
   };
   health?: {
-    type: "tcp" | "http";
+    type: "process" | "tcp" | "http" | "command" | "log" | "file";
     port?: number;
     host?: string;
     url?: string;
     interval_ms?: number;
     failure_threshold?: number;
+    command?: string;
+    log_line?: string;
+    file?: string;
   };
   restart?: {
-    max_attempts: number;
+    policy?: "always" | "on_failure" | "never" | "exit_on_failure";
+    max_attempts?: number;
     delay_ms?: number;
     backoff?: number;
+  };
+  replicas?: number;
+  ready_log_line?: string;
+  shutdown?: {
+    signal?: string;
+    timeout_ms?: number;
+    command?: string;
+  };
+  schedule?: {
+    [k: string]: unknown;
+  } & {
+    cron?: string;
+    interval_ms?: number;
+  };
+  disabled?: boolean;
+  notify?: {
+    desktop?: boolean;
+    webhook?: string;
+    after_ms?: number;
   };
   retry?: {
     attempts: number;

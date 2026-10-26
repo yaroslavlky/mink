@@ -14,6 +14,10 @@ export interface ExecutionPlan {
   entry?: Command;
   prepared?: PreparedCommand;
   dependencies: ExecutionPlan[];
+  dependencyRules: Array<{
+    condition: 'started' | 'healthy' | 'completed_successfully' | 'failed';
+    optional?: boolean;
+  }>;
   steps: Record<
     string,
     {
@@ -52,6 +56,7 @@ export function planExecution(
       id,
       key,
       dependencies: [],
+      dependencyRules: [],
       steps: Object.create(null),
       maxParallel: entry.kind === 'pipeline' ? (entry.max_parallel ?? Infinity) : Infinity,
       ...(entry.kind === 'pipeline'
@@ -64,9 +69,16 @@ export function planExecution(
       for (const name of entry.requires ?? [])
         if (plan.prepared.env[name] === undefined && process.env[name] === undefined)
           throw new Error(`${id}: required environment variable ${name} is not set`);
-      for (const dep of entry.depends_on ?? []) {
+      for (const configured of entry.depends_on ?? []) {
+        const dependency = typeof configured === 'string' ? { id: configured } : configured;
+        if (!condition(dependency.if, resolved, directory)) continue;
+        const dep = dependency.id;
         if (!dependencies.has(dep)) dependencies.set(dep, build(dep, `dependency:${dep}`, {}));
         plan.dependencies.push(dependencies.get(dep)!);
+        plan.dependencyRules.push({
+          condition: dependency.condition ?? 'completed_successfully',
+          optional: dependency.optional,
+        });
       }
     } else {
       const variants = Object.entries(entry.steps).flatMap(([stepId, step]) => {

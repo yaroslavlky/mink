@@ -53,11 +53,19 @@ export function validateReferences(config: MinkConfiguration): void {
       if (entry.exec && entry.shell) throw new Error(`${id}: exec does not use a shell`);
       if ([entry.command, entry.exec, ...(entry.args ?? [])].some((value) => value?.includes('\0')))
         throw new Error(`${id}: command and arguments cannot contain NUL`);
-      for (const dep of entry.depends_on ?? [])
-        if (!exists(dep) || entries[dep].kind !== 'command' || entries[dep].run?.mode === 'service')
+      for (const configured of entry.depends_on ?? []) {
+        const dependency = typeof configured === 'string' ? { id: configured } : configured;
+        const dep = dependency.id;
+        if (
+          !exists(dep) ||
+          entries[dep].kind !== 'command' ||
+          (entries[dep].run?.mode === 'service' &&
+            !['started', 'healthy'].includes(dependency.condition ?? ''))
+        )
           throw new Error(
             `${id}: dependency ${dep} must be a one-shot command; use pipeline needs for services`,
           );
+      }
       const run = entry.run;
       if (run?.mode !== 'service' && (run?.startup_timeout_ms || run?.ready))
         throw new Error(`${id}: startup settings require service mode`);
@@ -130,7 +138,9 @@ export function validateReferences(config: MinkConfiguration): void {
     (id) => {
       const e = entries[id];
       return e.kind === 'command'
-        ? (e.depends_on ?? [])
+        ? (e.depends_on ?? []).map((dependency) =>
+            typeof dependency === 'string' ? dependency : dependency.id,
+          )
         : [
             ...Object.values(e.steps).map((s) => s.uses),
             ...Object.values(e.hooks ?? {}).flatMap((value) =>

@@ -2,6 +2,8 @@
 import { defineCommand, defineCittyPlugin, runMain, type ArgsDef } from 'citty';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import manifest from '../package.json' with { type: 'json' };
 import {
   createMink,
@@ -17,6 +19,9 @@ import {
   shellInit,
   upgradeMink,
   GlobalConfigStore,
+  SupervisorServer,
+  SupervisorClient,
+  supervisorEndpoint,
   watchTasks,
   createRunLog,
   initConfig,
@@ -28,6 +33,7 @@ import {
   type Mink,
   type ParameterValue,
   type RunResult,
+  type RunEvent,
   type Settings,
   type ThemeName,
   type ShellName,
@@ -97,6 +103,39 @@ async function session<T>(
     return await action(mink);
   } finally {
     await mink.dispose();
+  }
+}
+async function supervisor(mink: Mink, args: { profile?: string }): Promise<SupervisorClient> {
+  const endpoint = supervisorEndpoint(mink.configFile);
+  const client = new SupervisorClient(endpoint);
+  try {
+    await client.ping();
+    return client;
+  } catch {
+    const child = spawn(
+      process.execPath,
+      [
+        process.argv[1],
+        'supervisor',
+        'serve',
+        '--config',
+        mink.configFile,
+        '--no-discovery',
+        ...(args.profile ? ['--profile', args.profile] : []),
+      ],
+      { detached: true, stdio: 'ignore', windowsHide: true },
+    );
+    child.unref();
+    for (let attempt = 0; attempt < 100; attempt++) {
+      await delay(25);
+      try {
+        await client.ping();
+        return client;
+      } catch {
+        /* Supervisor is still starting. */
+      }
+    }
+    throw new Error('Supervisor did not start');
   }
 }
 function parameters(m: Mink, id: string, rawArgs: string[]): Record<string, ParameterValue> {
@@ -359,6 +398,7 @@ const commands = {
       },
       tag: { type: 'string', description: 'Select commands by tag' },
       group: { type: 'string', description: 'Select commands by group' },
+      D: { type: 'boolean', description: 'Run through the background supervisor' },
       'log-file': { type: 'string', description: 'Write redacted JSONL output to a new file' },
       json: { type: 'boolean', description: 'JSON output with --dry-run' },
       'secret-env': {
@@ -404,6 +444,17 @@ const commands = {
             ...parameters(m, selectedTask, rawArgs),
           },
           controller = new AbortController();
+        if (args.D) {
+          await confirmPlan(m.plan(selectedTask, values), args.yes);
+          const result = await (await supervisor(m, args)).run(selectedTask, values);
+          console.log(
+            args.json
+              ? JSON.stringify({ formatVersion: 1, id: selectedTask, result }, null, 2)
+              : `${selectedTask}: ${result.state} (${result.durationMs} ms)`,
+          );
+          process.exitCode = exitCode(result);
+          return;
+        }
         const passthroughAt = rawArgs.indexOf('--');
         const passthrough = passthroughAt < 0 ? [] : rawArgs.slice(passthroughAt + 1);
         if (args['dry-run']) {
@@ -725,6 +776,238 @@ const commands = {
       console.log(
         args.json ? JSON.stringify({ formatVersion: 1, key: args.key, value }) : `Set ${args.key}`,
       );
+    },
+  }),
+  supervisor: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Run the background supervisor server' },
+    args: {
+      ...common,
+      action: { type: 'positional', required: true, description: 'serve' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      if (args.action !== 'serve') throw new Error('Supervisor action must be serve');
+      const mink = await createMink({
+        configFile: args.config,
+        discover: args.discovery,
+        profile: args.profile,
+      });
+      const server = new SupervisorServer(mink, supervisorEndpoint(mink.configFile));
+      await server.listen();
+      if (args.json)
+        console.log(
+          JSON.stringify({ formatVersion: 1, pid: process.pid, endpoint: server.endpoint }),
+        );
+      let close!: () => void;
+      const done = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      process.once('SIGINT', close);
+      process.once('SIGTERM', close);
+      await done;
+      await server.close();
+    },
+  }),
+  attach: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Attach to the project supervisor' },
+    args: { ...common, json: { type: 'boolean', description: 'JSON output' } },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const status = await (await supervisor(m, args)).request({ action: 'status' });
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, status }, null, 2)
+            : JSON.stringify(status, null, 2),
+        );
+      });
+    },
+  }),
+  detach: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Detach while leaving supervisor services running' },
+    args: { json: { type: 'boolean', description: 'JSON output' } },
+    run({ args }) {
+      console.log(args.json ? JSON.stringify({ formatVersion: 1, detached: true }) : 'Detached');
+    },
+  }),
+  stop: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Stop supervisor-owned services' },
+    args: {
+      ...common,
+      instance: { type: 'positional', required: false, description: 'Service instance' },
+      all: { type: 'boolean', description: 'Stop all services' },
+      force: { type: 'boolean', description: 'Force termination' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      if (!args.all && !args.instance) throw new Error('Use an instance or --all');
+      await session(args, async (m) => {
+        const value = await (
+          await supervisor(m, args)
+        ).request({
+          action: 'stop',
+          instance: args.instance,
+          all: args.all,
+          force: args.force,
+        });
+        console.log(
+          args.json ? JSON.stringify({ formatVersion: 1, value }, null, 2) : JSON.stringify(value),
+        );
+      });
+    },
+  }),
+  scale: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Scale a supervisor-owned service' },
+    args: {
+      ...common,
+      service: { type: 'positional', required: true, description: 'Service ID' },
+      count: { type: 'positional', required: true, description: 'Replica count' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const services = await (
+          await supervisor(m, args)
+        ).request({
+          action: 'scale',
+          service: args.service,
+          count: Number(args.count),
+        });
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, services }, null, 2)
+            : JSON.stringify(services),
+        );
+      });
+    },
+  }),
+  disable: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Disable or enable a supervisor service' },
+    args: {
+      ...common,
+      service: { type: 'positional', required: true, description: 'Service ID' },
+      enable: { type: 'boolean', description: 'Enable instead of disable' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const value = await (
+          await supervisor(m, args)
+        ).request({
+          action: 'disable',
+          service: args.service,
+          disabled: !args.enable,
+        });
+        console.log(
+          args.json ? JSON.stringify({ formatVersion: 1, value }, null, 2) : JSON.stringify(value),
+        );
+      });
+    },
+  }),
+  logs: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Read supervisor logs' },
+    args: {
+      ...common,
+      service: { type: 'positional', required: false, description: 'Service ID' },
+      lines: { type: 'string', default: '200', description: 'Maximum lines' },
+      follow: { type: 'boolean', description: 'Follow logs' },
+      since: {
+        type: 'string',
+        description: 'Only events since an ISO timestamp or milliseconds ago',
+      },
+      json: { type: 'boolean', description: 'JSON Lines output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const client = await supervisor(m, args);
+        let seen = 0;
+        for (;;) {
+          const events = await client.request<RunEvent[]>({
+            action: 'logs',
+            owner: args.service,
+            limit: Number(args.lines),
+          });
+          const since = args.since
+            ? /^\d+$/.test(args.since)
+              ? Date.now() - Number(args.since)
+              : Date.parse(args.since)
+            : 0;
+          for (const event of events.slice(seen).filter((event) => event.time >= since))
+            process.stdout.write(
+              args.json
+                ? `${JSON.stringify(event)}\n`
+                : `${new Date(event.time).toISOString()} [${event.id}] ${event.chunk ?? ''}`,
+            );
+          seen = events.length;
+          if (!args.follow) break;
+          await delay(250);
+        }
+      });
+    },
+  }),
+  events: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Print the supervisor event stream as JSONL' },
+    args: {
+      ...common,
+      lines: { type: 'string', default: '200', description: 'Maximum events' },
+      json: { type: 'boolean', default: true, description: 'JSON Lines output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const events = await (
+          await supervisor(m, args)
+        ).request<RunEvent[]>({
+          action: 'events',
+          limit: Number(args.lines),
+        });
+        for (const event of events) console.log(JSON.stringify(event));
+      });
+    },
+  }),
+  runs: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'List, show, or replay numbered supervisor runs' },
+    args: {
+      ...common,
+      action: { type: 'positional', required: true, description: 'ls, show, or replay' },
+      number: { type: 'positional', required: false, description: 'Run number' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        if (!['ls', 'show', 'replay'].includes(args.action))
+          throw new Error('Runs action must be ls, show, or replay');
+        const client = await supervisor(m, args);
+        const history = await client.request<
+          Array<{ id: string; time: string; state: string; durationMs: number }>
+        >({ action: 'history' });
+        if (args.action === 'ls') {
+          const entries = history.map((entry, index) => ({ number: index + 1, ...entry }));
+          console.log(
+            args.json
+              ? JSON.stringify({ formatVersion: 1, runs: entries }, null, 2)
+              : entries
+                  .map((entry) => `${entry.number}\t${entry.id}\t${entry.state}\t${entry.time}`)
+                  .join('\n'),
+          );
+          return;
+        }
+        const entry = history[Number(args.number) - 1];
+        if (!entry) throw new Error('Unknown run number');
+        const value = args.action === 'replay' ? await client.run(entry.id) : entry;
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, value }, null, 2)
+            : JSON.stringify(value, null, 2),
+        );
+      });
     },
   }),
   fmt: defineCommand({

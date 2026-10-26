@@ -15,7 +15,12 @@ export function createCommandGraph(config: MinkConfiguration): CommandGraph {
   const edges: CommandGraph['edges'] = [];
   for (const [id, entry] of Object.entries(config.commands)) {
     if (entry.kind === 'command')
-      for (const to of entry.depends_on ?? []) edges.push({ from: id, to, type: 'depends_on' });
+      for (const dependency of entry.depends_on ?? [])
+        edges.push({
+          from: id,
+          to: typeof dependency === 'string' ? dependency : dependency.id,
+          type: 'depends_on',
+        });
     else
       for (const step of Object.values(entry.steps))
         edges.push({ from: id, to: step.uses, type: 'uses' });
