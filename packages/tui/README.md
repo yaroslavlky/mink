@@ -22,7 +22,7 @@ Screens use typed view data and callbacks. They do not spawn commands or write s
 
 Tab cycles through Commands → Output → Services; Shift+Tab cycles in reverse. Search, selection, and unfinished form input survive tab changes. Only the visible screen handles keyboard input; Ctrl+B moves to the previous parameter within a form. Ctrl+P opens commands, Ctrl+O returns to output, and Ctrl+S opens owned services. The active section and focused panel use cyan; tasks, pipelines, and services have distinct badges. Ready/success is green, errors are red, and cancellation/warnings are yellow. Borders and text labels preserve meaning without color.
 
-At 100+ columns, the palette, output, and services use a split layout. Smaller terminals stack the panels. The minimum interactive viewport is 48 × 20. PageUp/PageDown scroll logs and pause following; End resumes live output. Preview displays dependency relationships rather than implying that every step runs sequentially.
+At 100+ columns, the palette, output, and services use a split layout. Smaller terminals stack the panels. The minimum interactive viewport is 48 × 20. The mouse wheel over the log pane scrolls three lines at a time; reaching the bottom resumes live output. PageUp/PageDown scroll logs and pause following; End resumes live output. Preview displays dependency relationships rather than implying that every step runs sequentially.
 
 Run locally from the repository root after `pnpm build:packages`:
 

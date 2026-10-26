@@ -330,6 +330,33 @@ it('pauses log following while scrolling and resumes on End', async () => {
   expect(ui.lastFrame()).toContain('LIVE');
 });
 
+it('scrolls logs with the mouse wheel only inside the active pane and resumes following at the tail', async () => {
+  const lines = Array.from({ length: 40 }, (_, index) => ({
+    key: String(index),
+    id: 'task',
+    stream: 'stdout' as const,
+    text: `line-${index}`,
+  }));
+  const ui = render(<LogView lines={lines} height={8} truncated={false} />);
+  await expect.poll(ui.lastFrame).toContain('35–40/40');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  ui.stdin.write('\u001b[<64;1;10M');
+  expect(ui.lastFrame()).toContain('LIVE');
+  ui.stdin.write('\u001b[<64;1;3M');
+  await expect.poll(ui.lastFrame).toContain('32–37/40');
+  expect(ui.lastFrame()).toContain('PAUSED');
+  ui.stdin.write('\u001b[<65;1;3M');
+  await expect.poll(ui.lastFrame).toContain('35–40/40');
+  expect(ui.lastFrame()).toContain('LIVE');
+  ui.stdin.write('\u001b[<64;');
+  ui.stdin.write('1;3M\u001b[<64;1;3M');
+  await expect.poll(ui.lastFrame).toContain('29–34/40');
+  ui.rerender(<LogView active={false} lines={lines} height={8} truncated={false} />);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  ui.stdin.write('\u001b[<64;1;3M');
+  expect(ui.lastFrame()).toContain('29–34/40');
+});
+
 it('reruns the last invocation after inspecting a different command', async () => {
   const m = await project({
     alpha: command('require("fs").appendFileSync("runs", "a")'),

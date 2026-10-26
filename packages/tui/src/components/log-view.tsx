@@ -1,5 +1,5 @@
-import { useContext, useEffect, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { useContext, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { Box, Text, measureElement, useInput, useStdin, useStdout, type DOMElement } from 'ink';
 import { filterLogLines, type LogLine } from '../model/log-buffer.js';
 import { LogInputContext } from './log-input.js';
 import { Input } from './input.js';
@@ -40,6 +40,54 @@ export function LogView({
         lines.findIndex((line) => line.key === anchor),
       )
     : tail;
+  const box = useRef<DOMElement>(null);
+  const { stdin } = useStdin();
+  const { stdout } = useStdout();
+  const wheel = useEffectEvent((button: number, x: number, y: number) => {
+    if (editing || !box.current || (button & ~29) !== 64) return;
+    const bounds = measureElement(box.current);
+    if (
+      x < bounds.x ||
+      x >= bounds.x + bounds.width ||
+      y < bounds.y ||
+      y >= bounds.y + bounds.height
+    )
+      return;
+    setAnchor((current) => {
+      const position = current
+        ? Math.max(
+            0,
+            lines.findIndex((line) => line.key === current),
+          )
+        : tail;
+      const next = Math.max(0, Math.min(tail, position + (button & 1 ? 3 : -3)));
+      return next === tail ? undefined : lines[next]?.key;
+    });
+  });
+  useEffect(() => {
+    if (!active || !('isTTY' in stdin) || !stdin.isTTY) return;
+    const terminal = 'isTTY' in stdout && stdout.isTTY;
+    // SGR mouse reporting preserves coordinates beyond the legacy 223-column limit.
+    if (terminal) stdout.write('\u001b[?1000h\u001b[?1006h');
+    let pending = '';
+    const data = (chunk: string | Buffer) => {
+      pending += chunk.toString();
+      // eslint-disable-next-line no-control-regex -- Terminal mouse escape sequence.
+      const reports = /\u001b\[<(\d+);(\d+);(\d+)([Mm])/g;
+      for (const report of pending.matchAll(reports)) {
+        if (report[4] === 'M')
+          wheel(Number(report[1]), Number(report[2]) - 1, Number(report[3]) - 1);
+      }
+      // Keep only an incomplete mouse report when a read splits an escape sequence.
+      // eslint-disable-next-line no-control-regex -- Partial terminal mouse escape sequence.
+      pending = pending.match(/\u001b(?:\[(?:<(?:\d*(?:;\d*){0,2}))?)?$/)?.[0] ?? '';
+    };
+    stdin.on('data', data);
+    return () => {
+      stdin.off('data', data);
+      if (terminal) stdout.write('\u001b[?1006l\u001b[?1000l');
+    };
+  }, [active, stdin, stdout]);
   useInput(
     (input, key) => {
       if (editing) {
@@ -81,7 +129,7 @@ export function LogView({
     { isActive: active },
   );
   return (
-    <Box flexDirection="column" height={height} overflow="hidden">
+    <Box ref={box} flexDirection="column" height={height} overflow="hidden">
       <Box height={1} flexShrink={0}>
         {editing ? (
           <>
