@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@yaroslavlky/mink-core": "workspace:*",
+    "@yaroslavlky/mink-mcp": "workspace:*",
     "@yaroslavlky/mink-tui": "workspace:*",
     "citty": "^0.2.2",
     "consola": "^3.4.2"

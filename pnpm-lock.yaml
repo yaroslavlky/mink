@@ -386,6 +386,9 @@ importers:
       '@yaroslavlky/mink-core':
         specifier: workspace:*
         version: link:../core
+      '@yaroslavlky/mink-mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@yaroslavlky/mink-tui':
         specifier: workspace:*
         version: link:../tui
@@ -436,6 +439,16 @@ importers:
       json-schema-to-typescript:
         specifier: ^16.0.0
         version: 16.0.0
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.31)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
+
+  packages/mcp:
+    dependencies:
+      '@yaroslavlky/mink-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.31)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)

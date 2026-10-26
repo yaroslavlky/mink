@@ -4,7 +4,10 @@ import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import manifest from '../package.json' with { type: 'json' };
+import { runMcpServer } from '@yaroslavlky/mink-mcp';
 import {
   createMink,
   describePlan,
@@ -24,6 +27,7 @@ import {
   supervisorEndpoint,
   watchTasks,
   createRunLog,
+  redactSecrets,
   initConfig,
   languages,
   parseParameter,
@@ -400,6 +404,10 @@ const commands = {
       group: { type: 'string', description: 'Select commands by group' },
       D: { type: 'boolean', description: 'Run through the background supervisor' },
       'log-file': { type: 'string', description: 'Write redacted JSONL output to a new file' },
+      'explain-failure': {
+        type: 'boolean',
+        description: 'Print a structured failure suitable for an agent',
+      },
       json: { type: 'boolean', description: 'JSON output with --dry-run' },
       'secret-env': {
         type: 'string',
@@ -464,10 +472,10 @@ const commands = {
           );
           return;
         }
-        await confirmPlan(m.plan(selectedTask, values), args.yes);
-        const log = args['log-file']
-          ? createRunLog(args['log-file'], m.plan(selectedTask, values))
-          : undefined;
+        const executionPlan = m.plan(selectedTask, values);
+        await confirmPlan(executionPlan, args.yes);
+        const failureEvents: RunEvent[] = [];
+        const log = args['log-file'] ? createRunLog(args['log-file'], executionPlan) : undefined;
         let interrupted: NodeJS.Signals | undefined;
         const sigint = () => {
             interrupted = 'SIGINT';
@@ -488,6 +496,10 @@ const commands = {
             args: passthrough,
             approved: true,
             onEvent: (e) => {
+              if (e.type === 'stderr' || e.type === 'finish') {
+                failureEvents.push(e);
+                if (failureEvents.length > 50) failureEvents.shift();
+              }
               log?.write(e);
               if (!e.chunk || args.output === 'quiet' || args.json) return;
               const chunk =
@@ -514,6 +526,26 @@ const commands = {
           }
           process.exitCode =
             interrupted === 'SIGTERM' ? 143 : interrupted ? 130 : serviceFailed ? 1 : exitCode(r);
+          if (args['explain-failure'] && r.state === 'failed')
+            console.log(
+              JSON.stringify({
+                formatVersion: 1,
+                failure: {
+                  step: selectedTask,
+                  exitCode: r.exitCode,
+                  signal: r.signal,
+                  timedOut: r.timedOut,
+                  error: r.error,
+                  tail: failureEvents.map((event) => ({
+                    type: event.type,
+                    id: event.id,
+                    chunk: event.chunk
+                      ? redactSecrets(event.chunk, executionPlan).slice(-4000)
+                      : undefined,
+                  })),
+                },
+              }),
+            );
           if (args.json)
             console.log(
               JSON.stringify(
@@ -1135,10 +1167,113 @@ const commands = {
   init: defineCommand({
     plugins: [strictArguments],
     meta: { description: 'Create mink.yml without overwriting an existing file' },
-    args: { config: common.config, json: { type: 'boolean', description: 'JSON output' } },
+    args: {
+      config: common.config,
+      agent: { type: 'boolean', description: 'Also create an AGENTS.md guide' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
     async run({ args }) {
       const file = await initConfig(args.config);
-      console.log(args.json ? JSON.stringify({ formatVersion: 1, file }) : `Created ${file}`);
+      const agentFile = resolve(file, '..', 'AGENTS.md');
+      if (args.agent)
+        await writeFile(
+          agentFile,
+          '# Repository commands\n\nUse `mink list --json` to discover commands, `mink plan <id> --json` before execution, and `mink run <id> --explain-failure` for bounded diagnostics. Never print secret parameter values.\n',
+          { flag: 'wx' },
+        );
+      const result = { formatVersion: 1, file, ...(args.agent ? { agentFile } : {}) };
+      console.log(
+        args.json
+          ? JSON.stringify(result)
+          : `Created ${file}${args.agent ? ` and ${agentFile}` : ''}`,
+      );
+    },
+  }),
+  mcp: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Run the permission-aware MCP server over stdio' },
+    args: {
+      ...common,
+      'read-only': { type: 'boolean', description: 'Disable mutating tools' },
+      allow: { type: 'string', description: 'Comma-separated command IDs or tags' },
+      approve: { type: 'boolean', description: 'Require approval on every mutation' },
+      'max-runs': { type: 'string', default: '20', description: 'Maximum runs per session' },
+      'timeout-ms': { type: 'string', description: 'Maximum duration of each run' },
+      'log-limit': { type: 'string', default: '200', description: 'Maximum retained log lines' },
+    },
+    async run({ args }) {
+      await runMcpServer({
+        cwd: typeof args.cwd === 'string' ? args.cwd : undefined,
+        configFile: typeof args.config === 'string' ? args.config : undefined,
+        readOnly: args['read-only'],
+        allow: args.allow?.split(',').filter(Boolean),
+        approve: args.approve,
+        maxRuns: Number(args['max-runs']),
+        timeoutMs: args['timeout-ms'] ? Number(args['timeout-ms']) : undefined,
+        logLimit: Number(args['log-limit']),
+      });
+    },
+  }),
+  report: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Write a redacted diagnostic bundle for a run' },
+    args: {
+      ...common,
+      run: { type: 'positional', required: true, description: 'Run number or command ID' },
+      output: { type: 'string', default: 'mink-report.json', description: 'Output path' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const history = (await m.state()).history;
+        const index = Number(args.run);
+        const selected =
+          Number.isInteger(index) && index > 0
+            ? history[index - 1]
+            : history.find((entry) => entry.id === args.run);
+        if (!selected) throw new Error(`Unknown run: ${args.run}`);
+        const bundle = {
+          formatVersion: 1,
+          run: selected,
+          graph: m.graph(),
+          environment: m.environment(selected.id),
+          plan: describePlan(m.plan(selected.id)),
+        };
+        const file = resolve(args.output);
+        await writeFile(file, `${JSON.stringify(bundle, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+        console.log(args.json ? JSON.stringify({ formatVersion: 1, file }) : `Created ${file}`);
+      });
+    },
+  }),
+  schema: defineCommand({
+    meta: { description: 'Print JSON Schemas for machine-readable output' },
+    subCommands: {
+      output: defineCommand({
+        args: {
+          command: { type: 'positional', required: true, description: 'CLI command' },
+        },
+        run({ args }) {
+          const properties: Record<string, unknown> = { formatVersion: { const: 1 } };
+          if (args.command === 'list') properties.commands = { type: 'array' };
+          else if (args.command === 'run') properties.result = { type: 'object' };
+          else if (args.command === 'plan') properties.plan = { type: 'object' };
+          else if (args.command === 'check') properties.valid = { type: 'boolean' };
+          else properties.data = {};
+          console.log(
+            JSON.stringify(
+              {
+                $schema: 'https://json-schema.org/draft/2020-12/schema',
+                type: 'object',
+                required: ['formatVersion'],
+                properties,
+                additionalProperties: true,
+              },
+              null,
+              2,
+            ),
+          );
+        },
+      }),
     },
   }),
   preset: defineCommand({

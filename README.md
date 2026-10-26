@@ -55,6 +55,7 @@ Do not put secrets in `mink.yml`; reference them through secret parameters or en
 ## What it does
 
 - A CLI with cached workflows, graph and environment inspection, and a per-project supervisor for detached services, logs, events, scaling, and run history.
+- A permission-aware stdio MCP server with redacted plans, bounded runs, resources, prompts, reports, and structured failure explanations.
 - Fuzzy command search, favourites, history, typed forms, command previews, and foreground stdin.
 - YAML and JSON Schema validation before execution, with cycle and reference checks.
 - Typed `string`, `number`, `boolean`, `select`, `port`, `path`, and `secret` parameters, defaults, conditions, and presets.

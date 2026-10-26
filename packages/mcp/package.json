@@ -1,0 +1,35 @@
+{
+  "name": "@yaroslavlky/mink-mcp",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --target node24 --platform node --dts --out-dir dist --clean && node ../../scripts/prepare-package.mjs mcp",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@yaroslavlky/mink-core": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yaroslavlky/mink.git",
+    "directory": "packages/mcp"
+  },
+  "description": "Permission-aware MCP server for Mink"
+}
