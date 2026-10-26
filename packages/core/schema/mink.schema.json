@@ -7,6 +7,23 @@
     "version": {
       "const": 1
     },
+    "includes": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["path", "namespace"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "namespace": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
     "repository": {
       "type": "object",
       "properties": {
@@ -24,6 +41,18 @@
       "properties": {
         "ttl_ms": { "type": "integer", "minimum": 0 },
         "max_size_bytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "remote_cache": {
+      "type": "object",
+      "required": ["provider", "url"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "provider": { "enum": ["http", "s3"] },
+        "url": { "type": "string", "minLength": 1 },
+        "token_env": { "type": "string", "minLength": 1 },
+        "signing_key_env": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },

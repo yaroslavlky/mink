@@ -80,7 +80,8 @@ export class Session {
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
-    const pool = new Slots(root.maxParallel),
+    if (options.continueOnError) root.failFast = false;
+    const pool = new Slots(options.concurrency ?? root.maxParallel),
       dependencyRuns = new Map<string, Promise<RunResult>>(),
       onceRuns = new Map<string, Promise<RunResult>>();
     const dependencyController = new AbortController();

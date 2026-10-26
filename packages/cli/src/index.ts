@@ -25,6 +25,10 @@ import {
   SupervisorServer,
   SupervisorClient,
   supervisorEndpoint,
+  workspaceGraph,
+  affectedPackages,
+  analyzePlan,
+  pruneWorkspace,
   watchTasks,
   createRunLog,
   redactSecrets,
@@ -402,6 +406,14 @@ const commands = {
       },
       tag: { type: 'string', description: 'Select commands by tag' },
       group: { type: 'string', description: 'Select commands by group' },
+      filter: { type: 'string', description: 'Filter workspace package, glob, or tag' },
+      affected: { type: 'boolean', description: 'Run packages affected by Git changes' },
+      since: { type: 'string', description: 'Git base ref for --affected' },
+      only: { type: 'boolean', description: 'Do not expand workspace dependents' },
+      concurrency: { type: 'string', description: 'Maximum concurrent processes' },
+      continue: { type: 'boolean', description: 'Continue independent work after failure' },
+      dry: { type: 'string', description: 'Deep dry run format; supports json' },
+      summarize: { type: 'string', description: 'Write the run summary JSON file' },
       D: { type: 'boolean', description: 'Run through the background supervisor' },
       'log-file': { type: 'string', description: 'Write redacted JSONL output to a new file' },
       'explain-failure': {
@@ -418,7 +430,27 @@ const commands = {
       await session(args, async (m) => {
         if (!['prefix', 'interleave', 'grouped', 'quiet', 'timed'].includes(args.output))
           throw new Error('Output must be prefix, interleave, grouped, quiet, or timed');
-        const targets = m.select(args.task, args.tag, args.group);
+        let targets = m.select(args.task, args.tag, args.group);
+        if (args.filter || args.affected) {
+          const graph = await workspaceGraph(m.directory);
+          let packages = graph;
+          if (args.affected) {
+            const affected = new Set(await affectedPackages(m.directory, args.since ?? 'HEAD~1'));
+            packages = graph.filter((item) => affected.has(item.name));
+          }
+          if (args.filter) {
+            const expression = new RegExp(
+              `^${args.filter.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')}$`,
+            );
+            packages = packages.filter(
+              (item) => expression.test(item.name) || item.tags.includes(args.filter!),
+            );
+          }
+          const prefixes = packages.map(
+            (item) => `${item.relativeDirectory.replaceAll('\\', '/')}:`,
+          );
+          targets = targets.filter((id) => prefixes.some((prefix) => id.startsWith(prefix)));
+        }
         if ((args.tag || args.group || args.task.includes('*')) && !targets.length)
           throw new Error('Selector matched no commands');
         if (targets.length > 1) {
@@ -465,10 +497,16 @@ const commands = {
         }
         const passthroughAt = rawArgs.indexOf('--');
         const passthrough = passthroughAt < 0 ? [] : rawArgs.slice(passthroughAt + 1);
-        if (args['dry-run']) {
+        if (args['dry-run'] || args.dry) {
           const plan = describePlan(m.plan(selectedTask, values));
           console.log(
-            args.json ? JSON.stringify({ formatVersion: 1, plan }, null, 2) : formatPlan(plan),
+            args.json || args.dry === 'json'
+              ? JSON.stringify(
+                  { formatVersion: 1, plan, cache: await m.why(selectedTask, values) },
+                  null,
+                  2,
+                )
+              : formatPlan(plan),
           );
           return;
         }
@@ -495,6 +533,8 @@ const commands = {
             force: args.force,
             args: passthrough,
             approved: true,
+            concurrency: args.concurrency ? Number(args.concurrency) : undefined,
+            continueOnError: args.continue,
             onEvent: (e) => {
               if (e.type === 'stderr' || e.type === 'finish') {
                 failureEvents.push(e);
@@ -553,6 +593,12 @@ const commands = {
                 null,
                 2,
               ),
+            );
+          if (args.summarize)
+            await writeFile(
+              resolve(args.summarize),
+              `${JSON.stringify({ formatVersion: 1, id: selectedTask, result: r }, null, 2)}\n`,
+              { flag: 'wx' },
             );
           else
             process.stderr.write(
@@ -682,6 +728,61 @@ const commands = {
           args.json
             ? JSON.stringify({ formatVersion: 1, ...summary }, null, 2)
             : `${summary.id}\t${summary.kind}\t${summary.name}${summary.description ? `\n${summary.description}` : ''}`,
+        );
+      });
+    },
+  }),
+  analyze: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Show the critical chain and workflow bottlenecks' },
+    args: { ...common, task, json: { type: 'boolean', description: 'JSON output' } },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const analysis = analyzePlan(m.plan(args.task));
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, ...analysis }, null, 2)
+            : `Critical chain (${analysis.depth}): ${analysis.criticalChain.join(' -> ')}\nNodes: ${analysis.nodes}`,
+        );
+      });
+    },
+  }),
+  workspaces: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Print the workspace package dependency graph' },
+    args: { ...common, json: { type: 'boolean', description: 'JSON output' } },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const graph = await workspaceGraph(m.directory);
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, packages: graph }, null, 2)
+            : graph
+                .map(
+                  (item) =>
+                    `${item.name}${item.dependencies.length ? ` -> ${item.dependencies.join(', ')}` : ''}`,
+                )
+                .join('\n'),
+        );
+      });
+    },
+  }),
+  prune: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Create a minimal workspace subtree for a package' },
+    args: {
+      ...common,
+      package: { type: 'positional', required: true, description: 'Workspace package name' },
+      output: { type: 'string', required: true, description: 'New child output directory' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      await session(args, async (m) => {
+        const packages = await pruneWorkspace(m.directory, args.package, args.output);
+        console.log(
+          args.json
+            ? JSON.stringify({ formatVersion: 1, output: resolve(args.output), packages }, null, 2)
+            : `Pruned ${packages.join(', ')} to ${resolve(args.output)}`,
         );
       });
     },

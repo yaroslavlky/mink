@@ -362,6 +362,8 @@ export type { PlanDescription } from './commands/describe.js';
 export { planFailedBranches } from './commands/plan.js';
 export { watchTasks } from './runtime/watch.js';
 export { CacheStore } from './runtime/cache.js';
+export { HttpRemoteCache, S3CompatibleCache } from './runtime/remote-cache.js';
+export type { RemoteCacheProvider, HttpCacheOptions } from './runtime/remote-cache.js';
 export type { WatchOptions } from './runtime/watch.js';
 export { createRunLog, redactSecrets } from './runtime/log.js';
 export { createCommandGraph, graphDot, graphMermaid, graphText } from './commands/graph.js';
@@ -375,6 +377,8 @@ export { GlobalConfigStore } from './storage.js';
 export type { GlobalConfig } from './storage.js';
 export { SupervisorServer, SupervisorClient, supervisorEndpoint } from './runtime/supervisor.js';
 export type { SupervisorRequest, SupervisorResponse } from './runtime/supervisor.js';
+export { workspaceGraph, affectedPackages, analyzePlan, pruneWorkspace } from './monorepo.js';
+export type { WorkspacePackage } from './monorepo.js';
 export {
   resolveValues,
   parseParameter,

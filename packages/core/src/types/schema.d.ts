@@ -111,6 +111,13 @@ export type IdList = string | [string, ...string[]];
 
 export interface MinkConfiguration {
   version: 1;
+  includes?: (
+    | string
+    | {
+        path: string;
+        namespace: string;
+      }
+  )[];
   repository?: {
     name?: string;
     description?: string;
@@ -118,6 +125,13 @@ export interface MinkConfiguration {
   cache?: {
     ttl_ms?: number;
     max_size_bytes?: number;
+  };
+  remote_cache?: {
+    enabled?: boolean;
+    provider: "http" | "s3";
+    url: string;
+    token_env?: string;
+    signing_key_env?: string;
   };
   vars?: {
     [k: string]: string | number | boolean;

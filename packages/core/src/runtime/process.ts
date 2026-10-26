@@ -36,6 +36,8 @@ export interface RunOptions {
   force?: boolean;
   args?: string[];
   approved?: boolean;
+  concurrency?: number;
+  continueOnError?: boolean;
 }
 export interface ProcessHandle {
   instance: string;

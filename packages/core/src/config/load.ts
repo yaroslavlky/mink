@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { glob } from 'tinyglobby';
 import { Ajv } from 'ajv';
 import { load } from 'js-yaml';
 import schema from '../../schema/mink.schema.json' with { type: 'json' };
@@ -21,11 +22,14 @@ export interface LoadedConfig {
   hiddenEnvironment: string[];
 }
 export function validateConfig(value: unknown): asserts value is MinkConfiguration {
+  validateConfigShape(value);
+  validateReferences(value);
+}
+function validateConfigShape(value: unknown): asserts value is MinkConfiguration {
   if (!validateShape(value))
     throw new Error(
       `Invalid Mink configuration: ${validateShape.errors?.map((e) => `${e.instancePath || '/'} ${e.message}`).join('; ')}`,
     );
-  validateReferences(value);
 }
 export async function loadConfig(
   file?: string,
@@ -48,9 +52,7 @@ export async function loadConfig(
   const directory = found ? dirname(found) : packageFile ? dirname(packageFile) : resolve(cwd);
   let config: MinkConfiguration = { version: 1, commands: {} };
   if (found) {
-    const parsed: unknown = load(await readFile(found, 'utf8'));
-    validateConfig(parsed);
-    config = parsed;
+    config = await loadComposed(found, new Set());
   }
   if (discovery) config.commands = { ...(await discover(directory)), ...config.commands };
   if (!found && !Object.keys(config.commands).length)
@@ -66,6 +68,65 @@ export async function loadConfig(
     environment,
     hiddenEnvironment: Object.keys(environment),
   };
+}
+
+async function loadComposed(file: string, stack: Set<string>): Promise<MinkConfiguration> {
+  const absolute = resolve(file);
+  if (stack.has(absolute))
+    throw new Error(`Configuration include cycle: ${[...stack, absolute].join(' -> ')}`);
+  const next = new Set(stack).add(absolute);
+  const parsed: unknown = load(await readFile(absolute, 'utf8'));
+  validateConfigShape(parsed);
+  const combined: MinkConfiguration = { version: 1, commands: {} };
+  for (const include of parsed.includes ?? []) {
+    const specification = typeof include === 'string' ? { path: include } : include;
+    const matches = await glob(specification.path, {
+      cwd: dirname(absolute),
+      absolute: true,
+      onlyFiles: true,
+    });
+    if (!matches.length) throw new Error(`Include matched no files: ${specification.path}`);
+    for (const match of matches.sort()) {
+      const child = await loadComposed(match, next);
+      const namespace = 'namespace' in specification ? specification.namespace : undefined;
+      const namespaced = namespace ? namespaceCommands(child, namespace) : child;
+      for (const [id, entry] of Object.entries(namespaced.commands)) {
+        if (Object.hasOwn(combined.commands, id))
+          throw new Error(`Duplicate included command: ${id}`);
+        combined.commands[id] = entry;
+      }
+    }
+  }
+  return { ...parsed, commands: { ...combined.commands, ...parsed.commands } };
+}
+
+function namespaceCommands(config: MinkConfiguration, namespace: string): MinkConfiguration {
+  const prefix = `${namespace}:`;
+  const qualify = (id: string) => `${prefix}${id}`;
+  const commands = Object.fromEntries(
+    Object.entries(config.commands).map(([id, source]) => {
+      const entry = structuredClone(source);
+      if (entry.kind === 'command')
+        entry.depends_on = entry.depends_on?.map((dependency) =>
+          typeof dependency === 'string'
+            ? qualify(dependency)
+            : { ...dependency, id: qualify(dependency.id) },
+        );
+      else {
+        for (const step of Object.values(entry.steps)) step.uses = qualify(step.uses);
+        if (entry.hooks)
+          for (const name of Object.keys(entry.hooks) as Array<keyof typeof entry.hooks>) {
+            const hook = entry.hooks[name];
+            if (hook)
+              entry.hooks[name] = Array.isArray(hook)
+                ? (hook.map(qualify) as [string, ...string[]])
+                : qualify(hook);
+          }
+      }
+      return [qualify(id), entry];
+    }),
+  );
+  return { ...config, includes: undefined, commands };
 }
 
 function values(value?: string | string[]): string[] {
