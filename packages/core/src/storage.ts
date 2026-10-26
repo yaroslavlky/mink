@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile, unlink } from 'node:fs/promises';
 import lockfile from 'proper-lockfile';
 import type { ParameterValue } from './commands/resolve.js';
 export interface HistoryEntry {
@@ -45,7 +45,7 @@ const fallbackSettings = (): Settings => ({
   theme: defaultSettings.theme,
   language: detectLanguage(),
 });
-function stateRoot(directory?: string): string {
+export function stateRoot(directory?: string): string {
   return (
     directory ??
     (process.env.XDG_STATE_HOME
@@ -178,6 +178,143 @@ export class StateStore {
     } finally {
       await unlink(temporary).catch(() => {});
       await release();
+    }
+  }
+}
+
+export interface TrustStatus {
+  trusted: boolean;
+  changed: boolean;
+  foreign: boolean;
+}
+export class TrustStore {
+  readonly file: string;
+  constructor(
+    private readonly configFile: string,
+    directory?: string,
+  ) {
+    this.file = join(stateRoot(directory), 'trust.json');
+  }
+  async status(): Promise<TrustStatus> {
+    const [content, metadata, records] = await Promise.all([
+      readFile(this.configFile),
+      stat(this.configFile),
+      this.read(),
+    ]);
+    const key = resolve(this.configFile),
+      fingerprint = createHash('sha256').update(content).digest('hex'),
+      saved = records[key];
+    return {
+      trusted: saved === fingerprint,
+      changed: saved !== undefined && saved !== fingerprint,
+      foreign:
+        process.platform !== 'win32' && typeof process.getuid === 'function'
+          ? metadata.uid !== process.getuid()
+          : false,
+    };
+  }
+  async trust(): Promise<TrustStatus> {
+    const content = await readFile(this.configFile);
+    const fingerprint = createHash('sha256').update(content).digest('hex');
+    await this.update((records) => {
+      records[resolve(this.configFile)] = fingerprint;
+    });
+    return this.status();
+  }
+  async untrust(): Promise<void> {
+    await this.update((records) => {
+      delete records[resolve(this.configFile)];
+    });
+  }
+  async assertTrusted(): Promise<void> {
+    const status = await this.status();
+    if (!status.foreign) return;
+    if (status.changed)
+      throw new Error(
+        'Configuration changed since it was trusted; inspect it and run mink trust again',
+      );
+    if (!status.trusted)
+      throw new Error('Foreign configuration is not trusted; inspect it and run mink trust');
+  }
+  private async read(): Promise<Record<string, string>> {
+    try {
+      const data: unknown = JSON.parse(await readFile(this.file, 'utf8'));
+      if (!record(data)) return {};
+      const entries = Object.entries(data).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      );
+      return Object.fromEntries(entries);
+    } catch (error) {
+      if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT')
+        return {};
+      throw error;
+    }
+  }
+  private async update(change: (records: Record<string, string>) => void): Promise<void> {
+    await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
+    const release = await lockfile.lock(this.file, {
+      realpath: false,
+      retries: { retries: 30, minTimeout: 20, maxTimeout: 100 },
+      stale: 10000,
+    });
+    const temporary = this.file + '.' + randomUUID() + '.tmp';
+    try {
+      const records = await this.read();
+      change(records);
+      await writeFile(temporary, JSON.stringify(records) + '\n', { mode: 0o600 });
+      await rename(temporary, this.file);
+    } finally {
+      await unlink(temporary).catch(() => {});
+      await release();
+    }
+  }
+}
+
+export interface GlobalConfig {
+  defaultProfile?: string;
+  output?: 'prefix' | 'interleave' | 'grouped' | 'quiet' | 'timed';
+  cacheTtlMs?: number;
+  cacheMaxSizeBytes?: number;
+}
+function configRoot(directory?: string): string {
+  return (
+    directory ??
+    (process.env.XDG_CONFIG_HOME
+      ? join(process.env.XDG_CONFIG_HOME, 'mink')
+      : process.platform === 'win32'
+        ? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'mink')
+        : join(homedir(), '.config', 'mink'))
+  );
+}
+export class GlobalConfigStore {
+  readonly file: string;
+  constructor(directory?: string) {
+    this.file = join(configRoot(directory), 'config.json');
+  }
+  async read(): Promise<GlobalConfig> {
+    try {
+      const value: unknown = JSON.parse(await readFile(this.file, 'utf8'));
+      return record(value) ? (value as GlobalConfig) : {};
+    } catch (error) {
+      if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT')
+        return {};
+      throw error;
+    }
+  }
+  async get(key: keyof GlobalConfig): Promise<GlobalConfig[keyof GlobalConfig]> {
+    return (await this.read())[key];
+  }
+  async set(key: keyof GlobalConfig, value: GlobalConfig[keyof GlobalConfig]): Promise<void> {
+    await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
+    const current = await this.read();
+    if (value === undefined) delete current[key];
+    else Object.assign(current, { [key]: value });
+    const temporary = this.file + '.' + randomUUID() + '.tmp';
+    try {
+      await writeFile(temporary, JSON.stringify(current, null, 2) + '\n', { mode: 0o600 });
+      await rename(temporary, this.file);
+    } finally {
+      await unlink(temporary).catch(() => {});
     }
   }
 }

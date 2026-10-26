@@ -19,12 +19,18 @@ import type { RunEvent, RunOptions, RunResult, ServiceInfo } from './runtime/pro
 import {
   SettingsStore,
   StateStore,
+  TrustStore,
+  GlobalConfigStore,
+  stateRoot,
   languages,
   themes,
   type LocalState,
   type Settings,
 } from './storage.js';
+import { CacheStore, type CacheInfo, type CacheStatus } from './runtime/cache.js';
 import type { MinkConfiguration } from './types/schema.js';
+import { createCommandGraph, type CommandGraph } from './commands/graph.js';
+import { resolveDynamicOptions } from './commands/options.js';
 export interface Mink {
   readonly configFile: string;
   readonly directory: string;
@@ -49,6 +55,17 @@ export interface Mink {
   savePreset(id: string, name: string, values: Record<string, ParameterValue>): Promise<void>;
   preset(id: string, name: string): Promise<Record<string, ParameterValue>>;
   dispose(): Promise<void>;
+  cacheInfo(): Promise<CacheInfo>;
+  clearCache(): Promise<void>;
+  pruneCache(): Promise<CacheInfo>;
+  why(id: string, values?: Record<string, ParameterValue>): Promise<CacheStatus[]>;
+  environment(id: string, values?: Record<string, ParameterValue>): Record<string, string>;
+  select(selector?: string, tag?: string, group?: string): string[];
+  graph(): CommandGraph;
+  options(id: string, parameter: string): Promise<string[]>;
+  trust(): Promise<import('./storage.js').TrustStatus>;
+  untrust(): Promise<void>;
+  trustStatus(): Promise<import('./storage.js').TrustStatus>;
 }
 export interface MinkOptions {
   configFile?: string;
@@ -56,17 +73,44 @@ export interface MinkOptions {
   logger?: ConsolaInstance;
   discover?: boolean;
   stateDirectory?: string;
+  profile?: string;
 }
 export async function createMink(options: MinkOptions = {}): Promise<Mink> {
   const logger = options.logger ?? createConsola().withTag('mink');
-  const loaded = await loadConfig(options.configFile, options.cwd, options.discover ?? true);
+  const globalConfig = await new GlobalConfigStore().read();
+  const loaded = await loadConfig(
+    options.configFile,
+    options.cwd,
+    options.discover ?? true,
+    options.profile ?? globalConfig.defaultProfile,
+  );
   const session = new Session(),
     store = new StateStore(loaded.file, options.stateDirectory),
-    settingsStore = new SettingsStore(options.stateDirectory);
-  const getEntry = (id: string) => {
-    if (!Object.hasOwn(loaded.config.commands, id)) throw new Error(`Unknown command: ${id}`);
+    settingsStore = new SettingsStore(options.stateDirectory),
+    cache = new CacheStore(loaded.directory, stateRoot(options.stateDirectory), {
+      ttl_ms: loaded.config.cache?.ttl_ms ?? globalConfig.cacheTtlMs,
+      max_size_bytes: loaded.config.cache?.max_size_bytes ?? globalConfig.cacheMaxSizeBytes,
+    }),
+    trust = new TrustStore(loaded.file, options.stateDirectory);
+  const aliases = new Map<string, string>();
+  for (const [id, entry] of Object.entries(loaded.config.commands))
+    for (const alias of entry.aliases ?? []) aliases.set(alias, id);
+  const canonical = (id: string) => aliases.get(id) ?? id;
+  const getEntry = (requested: string) => {
+    const id = canonical(requested);
+    if (!Object.hasOwn(loaded.config.commands, id))
+      throw new Error(`Unknown command: ${requested}`);
     return loaded.config.commands[id];
   };
+  const makePlan = (id: string, values: Record<string, ParameterValue> = {}) =>
+    planExecution(
+      loaded.config,
+      loaded.directory,
+      canonical(id),
+      values,
+      loaded.environment,
+      loaded.hiddenEnvironment,
+    );
   const pendingRuns = new Set<Promise<RunResult>>();
   return {
     configFile: loaded.file,
@@ -79,14 +123,26 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
       if (entry.kind !== 'command') throw new Error(`${id} is a pipeline; use plan()`);
       return prepareEntry(entry, resolveValues(entry, values, id), loaded.directory);
     },
-    plan: (id, values = {}) => planExecution(loaded.config, loaded.directory, id, values),
+    plan: makePlan,
     run(id, values = {}, runOptions = {}) {
       const pending = (async () => {
-        const fullPlan = planExecution(loaded.config, loaded.directory, id, values);
+        if (!loaded.discovered) await trust.assertTrusted();
+        const fullPlan = makePlan(id, values);
         const plan = runOptions.retryFailed
           ? planFailedBranches(fullPlan, runOptions.retryFailed)
           : fullPlan;
-        const executed = await session.run(plan, runOptions);
+        const needsApproval = (node: ExecutionPlan): boolean =>
+          !!(node.entry?.confirm || node.entry?.prompt) ||
+          node.dependencies.some(needsApproval) ||
+          Object.values(node.steps).some((step) => needsApproval(step.plan));
+        if (needsApproval(plan) && !runOptions.approved)
+          throw new Error('Command requires explicit approval');
+        if (runOptions.args?.length) {
+          if (!plan.prepared)
+            throw new Error('Passthrough arguments require a command, not a pipeline');
+          plan.prepared.args.push(...runOptions.args);
+        }
+        const executed = await session.run(plan, { ...runOptions, cache });
         const result = runOptions.retryFailed
           ? mergeRetryResult(runOptions.retryFailed, executed)
           : executed;
@@ -113,6 +169,67 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
       return pending;
     },
     subscribe: (listener) => session.subscribe(listener),
+    cacheInfo: () => cache.list(),
+    clearCache: () => cache.clear(),
+    pruneCache: () => cache.prune(),
+    async why(id, values = {}) {
+      const plan = makePlan(id, values);
+      const leaves: ExecutionPlan[] = [];
+      const collect = (node: ExecutionPlan) => {
+        if (node.entry) leaves.push(node);
+        for (const dependency of node.dependencies) collect(dependency);
+        for (const step of Object.values(node.steps)) collect(step.plan);
+      };
+      collect(plan);
+      return Promise.all(leaves.map((leaf) => cache.lookup(leaf)));
+    },
+    environment(id, values = {}) {
+      const plan = makePlan(id, values);
+      if (!plan.prepared) throw new Error(`${id} is a pipeline; inspect its plan instead`);
+      const hidden = new Set(plan.prepared.hiddenEnv);
+      return Object.fromEntries(
+        Object.entries(plan.prepared.env).map(([name, value]) => [
+          name,
+          hidden.has(name) ? '[hidden]' : value,
+        ]),
+      );
+    },
+    select(selector = '*', tag, group) {
+      const pattern = new RegExp(
+        `^${selector
+          .split('*')
+          .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*')}$`,
+      );
+      return Object.entries(loaded.config.commands)
+        .filter(
+          ([id, entry]) =>
+            pattern.test(id) &&
+            !entry.hidden &&
+            !entry.private &&
+            !entry.internal &&
+            (!tag || entry.tags?.includes(tag)) &&
+            (!group || entry.group === group),
+        )
+        .map(([id]) => id);
+    },
+    graph: () => createCommandGraph(loaded.config),
+    async options(id, parameter) {
+      if (!loaded.discovered) await trust.assertTrusted();
+      const entry = getEntry(id);
+      const definition = entry.params?.[parameter];
+      if (!definition) throw new Error(`${id}: unknown parameter ${parameter}`);
+      if (definition.options) return [...definition.options];
+      if (!definition.options_from) throw new Error(`${id}.${parameter}: no dynamic options`);
+      return resolveDynamicOptions(
+        definition.options_from.exec,
+        loaded.directory,
+        loaded.environment,
+      );
+    },
+    trust: () => trust.trust(),
+    untrust: () => trust.untrust(),
+    trustStatus: () => trust.status(),
     services: () =>
       session.services().map(({ instance, id, state, started, url, completion }) => ({
         instance,
@@ -202,6 +319,7 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
 }
 export { themes, languages, defaultSettings, detectLanguage } from './storage.js';
 export type { Settings, ThemeName, Language } from './storage.js';
+export type { TrustStatus } from './storage.js';
 export { validateConfig } from './config/load.js';
 export { initConfig } from './config/init.js';
 export { doctor, findExecutable } from './doctor.js';
@@ -210,8 +328,18 @@ export { describePlan, formatPlan } from './commands/describe.js';
 export type { PlanDescription } from './commands/describe.js';
 export { planFailedBranches } from './commands/plan.js';
 export { watchTasks } from './runtime/watch.js';
+export { CacheStore } from './runtime/cache.js';
 export type { WatchOptions } from './runtime/watch.js';
 export { createRunLog, redactSecrets } from './runtime/log.js';
+export { createCommandGraph, graphDot, graphMermaid, graphText } from './commands/graph.js';
+export type { CommandGraph } from './commands/graph.js';
+export { formatConfig, lintConfig } from './config/tools.js';
+export { resolveDynamicOptions } from './commands/options.js';
+export { shellCompletion, shellInit } from './shell.js';
+export type { ShellName } from './shell.js';
+export { upgradeMink } from './upgrade.js';
+export { GlobalConfigStore } from './storage.js';
+export type { GlobalConfig } from './storage.js';
 export {
   resolveValues,
   parseParameter,
@@ -229,5 +357,7 @@ export type {
   RunOptions,
   RunResult,
   ServiceInfo,
+  CacheInfo,
+  CacheStatus,
   LocalState,
 };

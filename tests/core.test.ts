@@ -111,6 +111,32 @@ describe('configuration and parameters', () => {
     expect(() => m.searchCommands('', 0)).toThrow();
     expect(commandLine(m.prepare('a'))).toContain('-e');
   });
+  it('replays successful cached output and invalidates it when sources change', async () => {
+    const m = await project({
+      build: command('require("fs").appendFileSync("runs", "x");process.stdout.write("built")', {
+        sources: ['input.txt'],
+        outputs: { auto: true },
+      }),
+    });
+    await writeFile(join(m.directory, 'input.txt'), 'one');
+    expect((await m.run('build')).cached).toBeUndefined();
+    expect((await m.run('build')).cached).toBe(true);
+    expect(await readFile(join(m.directory, 'runs'), 'utf8')).toBe('x');
+    await writeFile(join(m.directory, 'input.txt'), 'two');
+    await m.run('build');
+    expect(await readFile(join(m.directory, 'runs'), 'utf8')).toBe('xx');
+    expect((await m.why('build'))[0].reason).toBe('fingerprint matched');
+  });
+  it('records trust by config hash and notices a later change', async () => {
+    const m = await project({ build: command('') });
+    expect((await m.trustStatus()).trusted).toBe(false);
+    await m.trust();
+    expect((await m.trustStatus()).trusted).toBe(true);
+    await writeFile(m.configFile, '{"version":1,"commands":{}}');
+    expect((await m.trustStatus()).changed).toBe(true);
+    await m.untrust();
+    expect((await m.trustStatus()).trusted).toBe(false);
+  });
 });
 
 describe('discovery', () => {

@@ -19,6 +19,46 @@
       },
       "additionalProperties": false
     },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "ttl_ms": { "type": "integer", "minimum": 0 },
+        "max_size_bytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "vars": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "env_file": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      ]
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "vars": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean"] }
+          },
+          "env_file": { "$ref": "#/$defs/envFile" },
+          "commands": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/commandOverlay" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "commands": {
       "type": "object",
       "propertyNames": {
@@ -38,6 +78,31 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "envFile": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      ]
+    },
+    "commandOverlay": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "exec": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "cwd": { "type": "string", "minLength": 1 },
+        "disabled": { "type": "boolean" },
+        "vars": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        }
+      },
+      "additionalProperties": false
+    },
     "source": {
       "type": "object",
       "oneOf": [
@@ -90,6 +155,30 @@
             "type": "string"
           }
         },
+        "options_from": {
+          "type": "object",
+          "required": ["exec"],
+          "properties": { "exec": { "type": "string", "minLength": 1 } },
+          "additionalProperties": false
+        },
+        "required": { "type": "boolean" },
+        "regex": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": ["string", "number", "boolean"] }
+        },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "lock": { "type": "string", "minLength": 1 },
+        "positional": { "type": "boolean" },
+        "variadic": { "type": "boolean" },
         "env": {
           "type": "string",
           "minLength": 1
@@ -181,12 +270,13 @@
             }
           },
           "then": {
-            "required": ["options"],
+            "anyOf": [{ "required": ["options"] }, { "required": ["options_from"] }],
             "properties": {
               "default": {
                 "type": "string"
               }
-            }
+            },
+            "not": { "required": ["options", "options_from"] }
           }
         },
         {
@@ -507,7 +597,64 @@
         },
         "shell": {
           "enum": ["auto", "sh", "bash", "powershell", "pwsh"]
-        }
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "outputs": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            {
+              "type": "object",
+              "required": ["auto"],
+              "properties": { "auto": { "const": true } },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "cache": {
+          "type": "object",
+          "properties": {
+            "method": { "enum": ["checksum", "timestamp"] }
+          },
+          "additionalProperties": false
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "group": { "type": "string", "minLength": 1 },
+        "hidden": { "type": "boolean" },
+        "private": { "type": "boolean" },
+        "internal": { "type": "boolean" },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "disabled": { "type": "boolean" },
+        "confirm": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
+        "prompt": { "type": "string", "minLength": 1 },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "lock": { "type": "string", "minLength": 1 },
+        "vars": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "windows": { "$ref": "#/$defs/commandOverlay" },
+        "linux": { "$ref": "#/$defs/commandOverlay" },
+        "darwin": { "$ref": "#/$defs/commandOverlay" }
       },
       "additionalProperties": false,
       "oneOf": [
@@ -541,6 +688,11 @@
             "minLength": 1
           }
         },
+        "wait_for": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "with": {
           "type": "object",
           "propertyNames": {
@@ -558,6 +710,34 @@
                 "type": "boolean"
               }
             ]
+          }
+        },
+        "run": { "enum": ["once", "when_changed", "always"] },
+        "continue_on_error": { "type": "boolean" },
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "lock": { "type": "string", "minLength": 1 },
+        "optional": { "type": "boolean" },
+        "if": { "type": "string", "minLength": 1 },
+        "for": {
+          "type": "object",
+          "required": ["var", "values"],
+          "properties": {
+            "var": { "type": "string", "minLength": 1 },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": ["string", "number", "boolean"] }
+            }
+          },
+          "additionalProperties": false
+        },
+        "matrix": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": ["string", "number", "boolean"] }
           }
         }
       },
@@ -618,9 +798,44 @@
         "timeout_ms": {
           "type": "integer",
           "minimum": 1
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "group": { "type": "string", "minLength": 1 },
+        "hidden": { "type": "boolean" },
+        "private": { "type": "boolean" },
+        "internal": { "type": "boolean" },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "hooks": {
+          "type": "object",
+          "properties": {
+            "before": { "$ref": "#/$defs/idList" },
+            "after": { "$ref": "#/$defs/idList" },
+            "on_success": { "$ref": "#/$defs/idList" },
+            "on_failure": { "$ref": "#/$defs/idList" },
+            "finally": { "$ref": "#/$defs/idList" }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
+    },
+    "idList": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      ]
     }
   }
 }

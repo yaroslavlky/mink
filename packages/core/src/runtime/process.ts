@@ -14,6 +14,7 @@ export interface RunResult {
   steps?: Record<string, RunResult>;
   attempts?: number;
   reused?: boolean;
+  cached?: boolean;
 }
 export interface RunEvent {
   type: 'start' | 'stdout' | 'stderr' | 'ready' | 'finish' | 'health' | 'restart';
@@ -30,6 +31,9 @@ export interface RunOptions {
   onEvent?: (event: RunEvent) => void;
   stdin?: 'inherit' | 'ignore';
   retryFailed?: RunResult;
+  force?: boolean;
+  args?: string[];
+  approved?: boolean;
 }
 export interface ProcessHandle {
   instance: string;

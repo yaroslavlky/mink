@@ -4,20 +4,31 @@ title: CLI and palette
 
 # One engine, two interfaces
 
-| Command                   | Behavior                                              |
-| ------------------------- | ----------------------------------------------------- |
-| `mink` or `mink ui`       | Interactive command palette; requires a TTY           |
-| `mink list [--json]`      | List discovered and configured entries                |
-| `mink doctor [--json]`    | Diagnose config, tools, local ports and storage       |
-| `mink plan <id> [--json]` | Inspect the resolved graph with secrets masked        |
-| `mink watch <id>`         | Rerun on file changes without overlapping invocations |
-| `mink check`              | Validate schema, references, conditions, and cycles   |
-| `mink run <id>`           | Run a task or pipeline with live stdout/stderr        |
-| `mink init`               | Create a configuration without overwriting            |
-| `mink preset <id> <name>` | Save a new local parameter preset                     |
-| `mink favorite <id>`      | Toggle a local favorite                               |
+| Command                       | Behavior                                              |
+| ----------------------------- | ----------------------------------------------------- |
+| `mink` or `mink ui`           | Interactive command palette; requires a TTY           |
+| `mink list [--json]`          | List discovered and configured entries                |
+| `mink doctor [--json]`        | Diagnose config, tools, local ports and storage       |
+| `mink plan <id> [--json]`     | Inspect the resolved graph with secrets masked        |
+| `mink watch <id>`             | Rerun on file changes without overlapping invocations |
+| `mink check`                  | Validate schema, references, conditions, and cycles   |
+| `mink run <id>`               | Run a task or pipeline with live stdout/stderr        |
+| `mink init`                   | Create a configuration without overwriting            |
+| `mink preset <id> <name>`     | Save a new local parameter preset                     |
+| `mink favorite <id>`          | Toggle a local favorite                               |
+| `mink why <id> [--json]`      | Explain a cache hit, miss, or ineligibility           |
+| `mink cache ls/clear/prune`   | Manage local cached command results                   |
+| `mink trust` / `mink untrust` | Record or remove the current config hash              |
+| `mink graph`                  | Print text, JSON, DOT, or Mermaid dependency graphs   |
+| `mink env <id>`               | Print the resolved environment with masking           |
+| `mink fmt` / `mink lint`      | Format and statically inspect `mink.yml`              |
+| `mink explain <id>`           | Combine the resolved plan and cache decision          |
+| `mink summary <id>`           | Print compact command metadata                        |
+| `mink choose [query]`         | Fuzzy-select without opening the TUI                  |
 
 Place options **after the subcommand**. `--config path` selects a file explicitly. `--no-discovery` loads only that file. `--help` is available on every command.
+
+All headless commands provide `--json`. `mink run` supports `--output prefix|interleave|grouped|quiet|timed`, `--force`, `--yes`, `--profile`, `--tag`, and `--group`. A task selector may contain `*`, for example `mink run 'test:*'`. Arguments after `--` are appended without shell parsing.
 
 ```sh
 mink run greet --param person=Ada --config examples/demo/mink.yml
@@ -85,3 +96,7 @@ the current in-memory invocation and never persists parameter values.
 file. Records include time, process identity, stream and text. Known secret inputs
 are redacted across chunk boundaries independently for each stream. Live CLI output
 remains raw. Unrelated secrets printed by external tools cannot be recognized.
+
+## Trust
+
+Mink checks file ownership before executing a configured command. On Unix, a configuration owned by another user must be explicitly accepted with `mink trust`; the local trust record contains only the configuration path and SHA-256 hash. A changed trusted file is blocked until it is reviewed and trusted again. `mink untrust` removes the record. Configurations owned by the current user remain compatible with version 1 behavior.

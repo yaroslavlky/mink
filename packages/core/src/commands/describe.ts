@@ -34,11 +34,7 @@ export function describePlan(root: ExecutionPlan): PlanDescription {
     values.reduce((text, secret) => text.replaceAll(secret, '[hidden]'), value);
   const describe = (plan: ExecutionPlan): PlanDescription => {
     const p = plan.prepared;
-    const secretEnvs = new Set(
-      Object.values(plan.entry?.params ?? {})
-        .filter((param) => param.type === 'secret')
-        .map((param) => param.env),
-    );
+    const secretEnvs = new Set(p?.hiddenEnv);
     return {
       id: plan.id,
       key: plan.key,
