@@ -379,6 +379,20 @@ export { SupervisorServer, SupervisorClient, supervisorEndpoint } from './runtim
 export type { SupervisorRequest, SupervisorResponse } from './runtime/supervisor.js';
 export { workspaceGraph, affectedPackages, analyzePlan, pruneWorkspace } from './monorepo.js';
 export type { WorkspacePackage } from './monorepo.js';
+export { parameterSource } from './parameter-sources.js';
+export { discover } from './config/discover.js';
+export { initTemplate, installGitHooks } from './ecosystem.js';
+export type { TemplateName } from './ecosystem.js';
+export { defineConfig, createPluginRegistry, loadPlugins } from './plugins.js';
+export type {
+  MinkPlugin,
+  PluginRegistry,
+  DiscoveryProvider,
+  ParameterSource,
+  Runner,
+  SecretProvider,
+  Notifier,
+} from './plugins.js';
 export {
   resolveValues,
   parseParameter,

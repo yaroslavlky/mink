@@ -29,6 +29,8 @@ import {
   affectedPackages,
   analyzePlan,
   pruneWorkspace,
+  initTemplate,
+  installGitHooks,
   watchTasks,
   createRunLog,
   redactSecrets,
@@ -1270,11 +1272,20 @@ const commands = {
     meta: { description: 'Create mink.yml without overwriting an existing file' },
     args: {
       config: common.config,
+      template: {
+        type: 'string',
+        description: 'node, python, rust, go, monorepo, or compose-stack',
+      },
       agent: { type: 'boolean', description: 'Also create an AGENTS.md guide' },
       json: { type: 'boolean', description: 'JSON output' },
     },
     async run({ args }) {
-      const file = await initConfig(args.config);
+      const file = args.template
+        ? await initTemplate(
+            args.template as 'node' | 'python' | 'rust' | 'go' | 'monorepo' | 'compose-stack',
+            args.config,
+          )
+        : await initConfig(args.config);
       const agentFile = resolve(file, '..', 'AGENTS.md');
       if (args.agent)
         await writeFile(
@@ -1288,6 +1299,46 @@ const commands = {
           ? JSON.stringify(result)
           : `Created ${file}${args.agent ? ` and ${agentFile}` : ''}`,
       );
+    },
+  }),
+  import: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Import repository task files into mink.yml' },
+    args: { config: common.config, json: { type: 'boolean', description: 'JSON output' } },
+    async run({ args }) {
+      const file = await initConfig(args.config);
+      console.log(
+        args.json ? JSON.stringify({ formatVersion: 1, file }) : `Imported tasks to ${file}`,
+      );
+    },
+  }),
+  hooks: defineCommand({
+    meta: { description: 'Manage Git hooks' },
+    subCommands: {
+      install: defineCommand({
+        plugins: [strictArguments],
+        args: {
+          ...common,
+          'pre-commit': { type: 'string', description: 'Command for staged affected files' },
+          'pre-push': { type: 'string', description: 'Command for affected files' },
+          yes: { type: 'boolean', description: 'Confirm replacing no existing hooks' },
+          json: { type: 'boolean', description: 'JSON output' },
+        },
+        async run({ args }) {
+          if (!args.yes) throw new Error('Hook installation requires --yes');
+          await session(args, async (m) => {
+            const files = await installGitHooks(m.directory, {
+              preCommit: args['pre-commit'],
+              prePush: args['pre-push'],
+            });
+            console.log(
+              args.json
+                ? JSON.stringify({ formatVersion: 1, files })
+                : `Installed ${files.join(', ')}`,
+            );
+          });
+        },
+      }),
     },
   }),
   mcp: defineCommand({

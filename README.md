@@ -57,6 +57,7 @@ Do not put secrets in `mink.yml`; reference them through secret parameters or en
 - A CLI with cached workflows, graph and environment inspection, and a per-project supervisor for detached services, logs, events, scaling, and run history.
 - A permission-aware stdio MCP server with redacted plans, bounded runs, resources, prompts, reports, and structured failure explanations.
 - Workspace dependency graphs, affected/filter selection, namespaced config composition, deep dry-runs, critical-chain analysis, signed remote-cache providers, and repository pruning.
+- Trusted plugin contracts, broad static task discovery, portable runners, typed configuration helpers, Git hooks, tool requirements, imports, and starter templates.
 - Fuzzy command search, favourites, history, typed forms, command previews, and foreground stdin.
 - YAML and JSON Schema validation before execution, with cycle and reference checks.
 - Typed `string`, `number`, `boolean`, `select`, `port`, `path`, and `secret` parameters, defaults, conditions, and presets.

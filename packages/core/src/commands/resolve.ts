@@ -134,9 +134,25 @@ export function prepareEntry(
       if (p.type !== 'boolean') args.push(String(value));
     }
   }
+  let executable = entry.exec;
+  if (entry.runner && entry.runner !== 'local') {
+    if (!executable) throw new Error('Remote runners require exec instead of a shell command');
+    if (entry.runner.type === 'ssh') {
+      if (!entry.runner.target) throw new Error('ssh runner requires target');
+      args.unshift(entry.runner.target, executable);
+      executable = 'ssh';
+    } else if (entry.runner.type === 'docker') {
+      if (!entry.runner.image) throw new Error('docker runner requires image');
+      args.unshift('run', '--rm', entry.runner.image, executable);
+      executable = 'docker';
+    } else {
+      args.unshift('exec', '--workspace-folder', cwd ?? process.cwd(), executable);
+      executable = 'devcontainer';
+    }
+  }
   return {
-    command: entry.command ?? entry.exec!,
-    executable: entry.exec,
+    command: entry.command ?? executable!,
+    executable,
     shell: entry.shell,
     env,
     args,

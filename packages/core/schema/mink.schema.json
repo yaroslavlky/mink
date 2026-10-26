@@ -7,6 +7,11 @@
     "version": {
       "const": 1
     },
+    "plugins": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "includes": {
       "type": "array",
       "items": {
@@ -750,6 +755,25 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
+        },
+        "requires_tools": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "runner": {
+          "oneOf": [
+            { "enum": ["local"] },
+            {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "enum": ["ssh", "docker", "devcontainer"] },
+                "target": { "type": "string", "minLength": 1 },
+                "image": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "lock": { "type": "string", "minLength": 1 },
         "vars": {

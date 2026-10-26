@@ -46,6 +46,16 @@ export type Command = {
   confirm?: boolean | string;
   prompt?: string;
   requires?: string[];
+  requires_tools?: {
+    [k: string]: string;
+  };
+  runner?:
+    | "local"
+    | {
+        type: "ssh" | "docker" | "devcontainer";
+        target?: string;
+        image?: string;
+      };
   lock?: string;
   vars?: {
     [k: string]: string | number | boolean;
@@ -111,6 +121,7 @@ export type IdList = string | [string, ...string[]];
 
 export interface MinkConfiguration {
   version: 1;
+  plugins?: string[];
   includes?: (
     | string
     | {
