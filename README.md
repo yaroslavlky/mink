@@ -58,6 +58,10 @@ Do not put secrets in `mink.yml`; reference them through secret parameters or en
 - A permission-aware stdio MCP server with redacted plans, bounded runs, resources, prompts, reports, and structured failure explanations.
 - Workspace dependency graphs, affected/filter selection, namespaced config composition, deep dry-runs, critical-chain analysis, signed remote-cache providers, and repository pruning.
 - Trusted plugin contracts, broad static task discovery, portable runners, typed configuration helpers, Git hooks, tool requirements, imports, and starter templates.
+- Non-interactive CI with JUnit, GitHub summaries and explicit OpenTelemetry export; standalone-binary packaging and a thin VS Code client.
+
+Mink performs no anonymous telemetry. Network activity only occurs for explicit configured features.
+
 - Fuzzy command search, favourites, history, typed forms, command previews, and foreground stdin.
 - YAML and JSON Schema validation before execution, with cycle and reference checks.
 - Typed `string`, `number`, `boolean`, `select`, `port`, `path`, and `secret` parameters, defaults, conditions, and presets.

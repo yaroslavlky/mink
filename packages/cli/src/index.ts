@@ -31,6 +31,9 @@ import {
   pruneWorkspace,
   initTemplate,
   installGitHooks,
+  generateCi,
+  writeJunit,
+  exportOtlp,
   watchTasks,
   createRunLog,
   redactSecrets,
@@ -1264,6 +1267,63 @@ const commands = {
               })
             : `Valid: ${count} commands (${m.directory})`,
         );
+      });
+    },
+  }),
+  ci: defineCommand({
+    plugins: [strictArguments],
+    meta: { description: 'Run a CI task or generate provider configuration' },
+    args: {
+      ...common,
+      action: { type: 'positional', required: true, description: 'run or generate' },
+      target: { type: 'positional', required: true, description: 'Command ID or github/gitlab' },
+      task: { type: 'string', default: 'ci', description: 'Generated CI command ID' },
+      junit: { type: 'string', description: 'Write a JUnit XML report' },
+      'github-summary': { type: 'boolean', description: 'Write GITHUB_STEP_SUMMARY' },
+      'otel-endpoint': { type: 'string', description: 'Export an OTLP/HTTP span' },
+      output: { type: 'string', description: 'Generated workflow path' },
+      json: { type: 'boolean', description: 'JSON output' },
+    },
+    async run({ args }) {
+      if (args.action === 'generate') {
+        if (args.target !== 'github' && args.target !== 'gitlab')
+          throw new Error('CI provider must be github or gitlab');
+        const contents = generateCi(args.target, args.task);
+        if (args.output) await writeFile(resolve(args.output), contents, { flag: 'wx' });
+        else process.stdout.write(contents);
+        return;
+      }
+      if (args.action !== 'run') throw new Error('CI action must be run or generate');
+      process.env.NO_COLOR = '1';
+      await session(args, async (m) => {
+        const errors: string[] = [];
+        const result = await m.run(
+          args.target,
+          {},
+          {
+            approved: true,
+            stdin: 'ignore',
+            onEvent: (event) => {
+              if (event.type === 'stderr' && event.chunk) {
+                errors.push(event.chunk);
+                process.stderr.write(
+                  `::error title=${event.id}::${event.chunk.replaceAll(/\r?\n/g, '%0A')}\n`,
+                );
+              } else if (event.chunk) process.stdout.write(event.chunk);
+            },
+          },
+        );
+        if (args.junit) await writeJunit(resolve(args.junit), args.target, result);
+        if (args['github-summary'] && process.env.GITHUB_STEP_SUMMARY)
+          await writeFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            `## Mink\n\n**${args.target}**: ${result.state} in ${result.durationMs} ms\n`,
+            { flag: 'a' },
+          );
+        if (args['otel-endpoint']) await exportOtlp(args['otel-endpoint'], args.target, result);
+        if (args.json)
+          console.log(JSON.stringify({ formatVersion: 1, id: args.target, result, errors }));
+        process.exitCode = exitCode(result);
       });
     },
   }),

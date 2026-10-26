@@ -1,0 +1,7 @@
+{
+  "main": "../packages/cli/dist/index.js",
+  "output": "mink.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true
+}

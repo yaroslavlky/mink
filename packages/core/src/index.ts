@@ -383,6 +383,7 @@ export { parameterSource } from './parameter-sources.js';
 export { discover } from './config/discover.js';
 export { initTemplate, installGitHooks } from './ecosystem.js';
 export type { TemplateName } from './ecosystem.js';
+export { generateCi, writeJunit, exportOtlp } from './ci.js';
 export { defineConfig, createPluginRegistry, loadPlugins } from './plugins.js';
 export type {
   MinkPlugin,

@@ -469,6 +469,12 @@ importers:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.31)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
 
+  packages/vscode:
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.31)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.3.1':
