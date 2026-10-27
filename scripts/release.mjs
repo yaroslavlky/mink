@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import { run } from './process.mjs';
 
 export const root = resolve(import.meta.dirname, '..');
-export const directories = ['core', 'tui', 'cli'];
+// Publish runtime dependencies before the CLI consumed by the install smoke test.
+export const directories = ['core', 'tui', 'mcp', 'cli'];
 export const destination = resolve(root, 'work/release');
 
 export async function manifests() {
