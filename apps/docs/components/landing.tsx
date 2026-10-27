@@ -105,6 +105,54 @@ const bentoLayout = [
   { colSpan: 2, visual: <ThemesVisual /> },
 ];
 
+const capabilityGroups = [
+  {
+    title: 'Fast, explainable workflows',
+    description:
+      'Content and timestamp fingerprints, output restoration, replayable local cache, `mink why`, deep JSON dry-runs, retries, timeouts, locks, hooks, and explicit output modes.',
+  },
+  {
+    title: 'Configuration that scales',
+    description:
+      'Profiles, layered env files, variables, per-OS overrides, typed and dynamic parameters, aliases, tags, groups, wildcards, matrices, loops, conditions, and namespaced includes.',
+  },
+  {
+    title: 'Persistent local services',
+    description:
+      'A per-project supervisor keeps services alive after the TUI closes, with replicas, scaling, schedules, restart policies, readiness and liveness probes, logs, events, and run history.',
+  },
+  {
+    title: 'Agent-ready by design',
+    description:
+      'A permission-aware stdio MCP server exposes bounded list, plan, run, cancel, logs, services, and history tools plus graph/schema resources, repair prompts, redacted reports, and structured failures.',
+  },
+  {
+    title: 'Monorepos without guesswork',
+    description:
+      'Workspace dependency graphs, package-script import, `--filter`, `--affected`, `--since`, concurrency controls, critical-chain analysis, minimal repository pruning, and signed remote-cache providers.',
+  },
+  {
+    title: 'Bring the tools you use',
+    description:
+      'Static discovery covers npm, pnpm, Yarn, Make, Task, Compose, just, mise, Procfile, process-compose, Cargo, Python, Go, and Deno. Trusted plugins extend discovery, secrets, runners, parameters, and notifications.',
+  },
+  {
+    title: 'Every client, one core',
+    description:
+      'The keyboard-first TUI, JSON CLI, shell completions, MCP server, supervisor, and VS Code command tree all use the same validated execution plans and secret-redaction boundary.',
+  },
+  {
+    title: 'Ready for local and CI use',
+    description:
+      'Non-interactive CI mode emits JUnit, GitHub summaries, annotations, and opt-in OpenTelemetry. Generate GitHub or GitLab workflows and install pre-commit or pre-push hooks.',
+  },
+  {
+    title: 'Portable and private',
+    description:
+      'Node 24+ on Windows, Linux, and macOS, with npm packages and standalone-binary manifests. No account, hosted control plane, or anonymous telemetry; network activity is always explicit.',
+  },
+] as const;
+
 function GitHubLogo({ className }: { className?: string }) {
   return (
     <svg
@@ -240,6 +288,7 @@ export function Landing({ locale }: { locale: Locale }) {
     name: 'Mink',
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Windows, Linux, macOS',
+    softwareVersion: '0.9.0',
     description: copy.meta.description,
     url: absoluteUrl(localeHref[locale]),
     downloadUrl: repoUrl,
@@ -360,6 +409,9 @@ export function Landing({ locale }: { locale: Locale }) {
         <div className="absolute inset-x-0 top-[560px] -z-10 h-64 bg-gradient-to-b from-transparent to-background" />
         <div className="mx-auto grid max-w-[1280px] items-center gap-14 px-6 pt-32 pb-24 md:pt-40 lg:grid-cols-[0.9fr_1.1fr]">
           <div data-gsap="hero-copy" className="flex flex-col items-start gap-8">
+            <span className="rounded-full border border-border bg-background/60 px-3 py-1 font-mono text-xs text-muted-foreground backdrop-blur">
+              Mink 0.9.0
+            </span>
             <h1 className="text-5xl leading-[1.05] font-normal tracking-[-0.03em] text-foreground md:text-7xl">
               {copy.hero.titleLead}
               <br />
@@ -437,6 +489,46 @@ export function Landing({ locale }: { locale: Locale }) {
             />
           </div>
         </section>
+
+        {locale === 'en' ? (
+          <section
+            id="capabilities"
+            data-gsap="section"
+            className="scroll-mt-24 space-y-10"
+            aria-labelledby="capabilities-title"
+          >
+            <div className="max-w-3xl space-y-4">
+              <p className="font-mono text-xs tracking-[0.18em] text-muted-foreground uppercase">
+                Mink 0.9
+              </p>
+              <h2
+                id="capabilities-title"
+                className="text-[30px] leading-[1.2] font-normal tracking-[-0.025em] md:text-[34px]"
+              >
+                One control plane for the whole repository.
+              </h2>
+              <p className="text-muted-foreground">
+                Start with the commands you already have. Add caching, services, monorepo selection,
+                agent access, CI reporting, and integrations only where the repository needs them.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {capabilityGroups.map((group) => (
+                <Card key={group.title} className="bg-card">
+                  <CardContent className="space-y-3 p-6">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
+                        <Check className="size-3.5" aria-hidden />
+                      </span>
+                      <h3 className="text-base font-medium text-foreground">{group.title}</h3>
+                    </div>
+                    <p className="text-sm leading-6 text-muted-foreground">{group.description}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section
           data-gsap="section"

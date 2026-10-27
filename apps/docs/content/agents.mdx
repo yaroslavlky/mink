@@ -1,0 +1,11 @@
+---
+title: Agents and MCP
+---
+
+# Give agents a bounded interface
+
+`mink mcp` starts an MCP server over stdio. It exposes command discovery, redacted plans, bounded execution and cancellation, log tails, service status, and history. Resources provide the configuration JSON Schema, current graph, and recent runs; the `fix-failed-step` prompt guides a small repair loop.
+
+Use `--read-only` for inspection, `--allow build,test` for command IDs or tags, `--approve` to require an approval bit on every mutation, and `--max-runs`, `--timeout-ms`, and `--log-limit` for hard session limits. Errors are structured and output is stripped of control sequences, truncated, and redacted with the same secret metadata as core.
+
+`mink init --agent` creates both `mink.yml` and a small `AGENTS.md`. `mink report <run>` writes a mode-0600 JSON bundle containing a redacted environment, graph, plan, and run record. `mink run <id> --explain-failure` emits the failing step, exit status, signal, timeout state, error, and a bounded log tail. `mink schema output <command>` prints the JSON Schema for machine-readable CLI output.

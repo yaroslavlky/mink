@@ -66,6 +66,37 @@ Loading validates structure, IDs, dependency/step/condition cycles, parameter de
 
 Validation does not execute shell code or verify that external tools, files, credentials, or services exist. Failures from those resources appear as runtime errors and exit codes.
 
+## Local cache
+
+A one-shot command can declare input globs. Mink fingerprints the command definition, non-secret parameter environment, and the matching files. The default is a content checksum; `cache.method: timestamp` uses mtime and size instead. A successful matching invocation is skipped and its redacted stdout/stderr is replayed. Services and commands without `sources` are never cached.
+
+```yaml
+cache:
+  ttl_ms: 604800000
+  max_size_bytes: 536870912
+commands:
+  build:
+    kind: command
+    name: Build
+    exec: node
+    args: ['build.mjs']
+    sources: ['src/**/*.ts', 'package.json']
+    outputs: { auto: true }
+    cache: { method: checksum }
+```
+
+Use `mink why build` to inspect the decision, `mink run build --force` to bypass it, and `mink cache ls|prune|clear` to manage local records. Cache files contain only a fingerprint, result metadata, and redacted log chunks; they do not store secret input values.
+
+Explicit output globs are stored with a successful cache record and restored on a hit. `outputs: { auto: true }` records files created or changed by the command while excluding Git metadata, dependencies, and Mink state.
+
+## Profiles, variables and environment
+
+Top-level `vars` substitute `${name}` in command definitions. `.env` and `.env.local` are layered by default; `env_file` selects an explicit ordered list. Env-file values are available to processes but masked by `mink env`, plans, cache logs, and JSON diagnostics. Profiles extend variables, env files, and selected command fields and are activated with `--profile` or `mink config set defaultProfile ci`.
+
+Commands can define `windows`, `linux`, and `darwin` overrides, aliases, tags, a group, visibility, confirmation, required environment variables, and a lock. Private/internal entries are valid only as dependencies. Hidden entries are omitted from search and selection.
+
+Pipeline steps support `run: once|when_changed|always`, `for`, `matrix`, `if`, `wait_for`, `optional`, `continue_on_error`, `timeout_ms`, and `lock`. Pipeline hooks are `before`, `after`, `on_success`, `on_failure`, and `finally`; cleanup hooks run after failed branches.
+
 ## Portable execution
 
 ```yaml

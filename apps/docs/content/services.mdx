@@ -24,6 +24,9 @@ run:
 | `process` (default) | Shell process spawned; application initialization is not verified       |
 | `tcp`               | Connection succeeds to `host` (default `127.0.0.1`) and required `port` |
 | `http`              | GET to required HTTP(S) `url` returns a 2xx response; redirects fail    |
+| `command`           | The configured command exits successfully                               |
+| `log`               | Output contains `log_line`; `ready_log_line` is shorthand               |
+| `file`              | The configured file exists                                              |
 
 HTTP and TCP attempts have a short bounded timeout. Failed attempts repeat at `interval_ms` (default 100). Startup defaults to 30 seconds; expiration stops the process tree and produces a failed, timed-out result. Health addresses are literal configuration values; they are not derived from parameterized ports.
 
@@ -37,7 +40,9 @@ Mink rejects a second scheduled/running instance of the same service ID, includi
 
 On Linux/macOS each child starts in its own POSIX process group. On Windows a supervisor assigns a suspended process to a kill-on-close Job Object before allowing it to create descendants. Cancel, timeout, shutdown, and natural shell exit clean up its descendants. SIGTERM escalates to SIGKILL after 800 ms if the shell has not exited. Mink acts only on process groups it created.
 
-Exiting the palette or sending SIGINT/SIGTERM to Mink disposes of its session. `mink run` stays alive while its services run and reports a service failure through the exit code. There is no daemon, external-process adoption or persistence across sessions. Optional restart policies run only while Mink owns the session. A child that deliberately detaches into a new session is beyond process-group ownership.
+Use `mink run <service> -D` to hand a service to the per-project background supervisor. `mink attach` shows its status; `mink detach` disconnects without stopping it, and `mink stop --all` performs an explicit shutdown. The transport is a permission-restricted Unix socket or Windows named pipe. `mink scale`, `mink disable`, `mink logs`, `mink events`, and `mink runs` use the same protocol, so closing the TUI does not stop supervised services. Foreground sessions are still disposed when their client exits. A child that deliberately detaches into a new process group is beyond Mink ownership.
+
+Scheduled commands accept `schedule.interval_ms` or the minimal cron form `*/N * * * *`. Disabled services do not start until enabled. `replicas` declares the initial service count, and `mink scale <id> <count>` changes it at runtime.
 
 ## Continuous health and bounded restart
 

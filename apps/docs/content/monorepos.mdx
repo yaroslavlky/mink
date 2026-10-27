@@ -1,0 +1,13 @@
+---
+title: Monorepos and scale
+---
+
+# Run only the work that matters
+
+Mink reads npm, pnpm, and Yarn workspace declarations, imports package scripts with path-qualified IDs, and exposes the package dependency graph with `mink workspaces`. `mink run` accepts `--filter <package|glob|tag>`, `--affected`, and `--since <ref>`; affected selection includes dependent packages unless `--only` is used.
+
+`includes` composes YAML files and accepts globs. Use `{path: configs/*.yml, namespace: tools}` to prefix included command IDs. Mink rejects missing globs, duplicate IDs, reference errors, and include cycles.
+
+`--concurrency` bounds processes and `--continue` keeps independent branches running. `--dry=json` reports the resolved plan and cache decisions without executing it. `--summarize <file>` writes the final structured result. `mink analyze <id>` prints the critical chain, while `mink prune <package> --output <child-dir>` copies the target workspace and its internal dependencies into a minimal subtree.
+
+Remote cache providers implement the signed `RemoteCacheProvider` interface. HTTP and S3-compatible implementations are built in but remain disabled unless configured. Records are addressed by SHA-256 fingerprint and signed with HMAC when a signing key is supplied.

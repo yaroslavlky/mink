@@ -119,6 +119,8 @@ export async function doctor(options: MinkOptions = {}): Promise<DoctorReport> {
           `shell for ${id}`,
         );
       }
+      for (const [tool, version] of Object.entries(entry.requires_tools ?? {}))
+        tools.set(tool, `command ${id} requires ${version}`);
       try {
         if (!(await stat(cwd)).isDirectory()) throw new Error();
       } catch {

@@ -113,9 +113,9 @@ export interface LandingCopy {
 export const landingCopy: Record<Locale, LandingCopy> = {
   en: {
     meta: {
-      title: 'Mink: terminal command palette',
+      title: 'Mink 0.9: repository control plane',
       description:
-        'Find, configure, and run the commands, pipelines, and services already in your repository from one terminal palette.',
+        'Run cached workflows, persistent services, monorepo tasks, CI jobs, and agent tools from one local, cross-platform repository control plane.',
     },
     languageSwitcher: 'Change language',
     nav: {
@@ -128,7 +128,7 @@ export const landingCopy: Record<Locale, LandingCopy> = {
       titleLead: "Your repo's commands,",
       titleAccent: 'without the README hunt.',
       description:
-        'Mink finds the package scripts, Make targets, and shell files already in your repository. Run them from one terminal palette with typed parameters and a preview of what will execute.',
+        'Mink discovers the tools already in your repository, then adds typed inputs, cached workflows, persistent services, monorepo selection, CI reports, and bounded agent access — locally, with no account or telemetry.',
       primaryCta: 'Get Mink running',
       secondaryCta: 'See how it works',
       agentCta: 'Copy agent prompt',

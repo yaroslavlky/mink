@@ -1,0 +1,18 @@
+PackageIdentifier: Yaroslavlky.Mink
+PackageVersion: 0.9.0
+PackageLocale: en-US
+Publisher: Yaroslav Klyuev
+PackageName: Mink
+License: MIT
+ShortDescription: Repository control center
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: mink.exe
+        PortableCommandAlias: mink
+    InstallerUrl: https://github.com/yaroslavlky/mink/releases/download/v0.9.0/mink-windows-x64.zip
+    InstallerSha256: RELEASE_SHA256
+ManifestType: singleton
+ManifestVersion: 1.9.0

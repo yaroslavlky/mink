@@ -1,0 +1,51 @@
+{
+  "name": "mink-vscode",
+  "displayName": "Mink",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --target node24 --platform node --out-dir dist --clean",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "activationEvents": [
+    "onView:mink.commands",
+    "onCommand:mink.run"
+  ],
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "mink.commands",
+          "name": "Mink"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mink.refresh",
+        "title": "Mink: Refresh Commands"
+      },
+      {
+        "command": "mink.run",
+        "title": "Mink: Run Command"
+      },
+      {
+        "command": "mink.services",
+        "title": "Mink: Service Status"
+      },
+      {
+        "command": "mink.logs",
+        "title": "Mink: Open Logs"
+      }
+    ]
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  }
+}

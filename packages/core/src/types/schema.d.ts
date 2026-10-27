@@ -5,13 +5,14 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
+export type EnvFile = string | [string, ...string[]];
 export type Command = {
   kind: "command";
   name: string;
   description?: string;
   command?: string;
   source?: Source;
-  depends_on?: string[];
+  depends_on?: Dependency[];
   params?: Params;
   run?: Run;
   presets?: {
@@ -23,6 +24,45 @@ export type Command = {
   exec?: string;
   args?: string[];
   shell?: "auto" | "sh" | "bash" | "powershell" | "pwsh";
+  /**
+   * @minItems 1
+   */
+  sources?: [string, ...string[]];
+  outputs?:
+    | [string, ...string[]]
+    | {
+        auto: true;
+      };
+  cache?: {
+    method?: "checksum" | "timestamp";
+  };
+  tags?: string[];
+  group?: string;
+  hidden?: boolean;
+  private?: boolean;
+  internal?: boolean;
+  aliases?: string[];
+  disabled?: boolean;
+  confirm?: boolean | string;
+  prompt?: string;
+  requires?: string[];
+  requires_tools?: {
+    [k: string]: string;
+  };
+  runner?:
+    | "local"
+    | {
+        type: "ssh" | "docker" | "devcontainer";
+        target?: string;
+        image?: string;
+      };
+  lock?: string;
+  vars?: {
+    [k: string]: string | number | boolean;
+  };
+  windows?: CommandOverlay;
+  linux?: CommandOverlay;
+  darwin?: CommandOverlay;
 } & Command1;
 export type Source = {
   package_script?: {
@@ -34,6 +74,14 @@ export type Source = {
 export type Source1 = {
   [k: string]: unknown;
 };
+export type Dependency =
+  | string
+  | {
+      id: string;
+      condition?: "started" | "healthy" | "completed_successfully" | "failed";
+      optional?: boolean;
+      if?: string;
+    };
 export type CommandParameter = Parameter;
 export type Parameter = {
   type: "string" | "boolean" | "number" | "select" | "port" | "path" | "secret";
@@ -43,6 +91,21 @@ export type Parameter = {
    * @minItems 1
    */
   options?: [string, ...string[]];
+  options_from?: {
+    exec: string;
+  };
+  required?: boolean;
+  regex?: string;
+  min?: number;
+  max?: number;
+  /**
+   * @minItems 1
+   */
+  enum?: [string | number | boolean, ...(string | number | boolean)[]];
+  requires?: string[];
+  lock?: string;
+  positional?: boolean;
+  variadic?: boolean;
   env?: string;
   flag?: string;
   when?: {
@@ -54,15 +117,60 @@ export type Command1 = {
   [k: string]: unknown;
 };
 export type PipelineParameter = Parameter;
+export type IdList = string | [string, ...string[]];
 
 export interface MinkConfiguration {
   version: 1;
+  plugins?: string[];
+  includes?: (
+    | string
+    | {
+        path: string;
+        namespace: string;
+      }
+  )[];
   repository?: {
     name?: string;
     description?: string;
   };
+  cache?: {
+    ttl_ms?: number;
+    max_size_bytes?: number;
+  };
+  remote_cache?: {
+    enabled?: boolean;
+    provider: "http" | "s3";
+    url: string;
+    token_env?: string;
+    signing_key_env?: string;
+  };
+  vars?: {
+    [k: string]: string | number | boolean;
+  };
+  env_file?: string | [string, ...string[]];
+  profiles?: {
+    [k: string]: {
+      vars?: {
+        [k: string]: string | number | boolean;
+      };
+      env_file?: EnvFile;
+      commands?: {
+        [k: string]: CommandOverlay;
+      };
+    };
+  };
   commands: {
     [k: string]: Command | Pipeline;
+  };
+}
+export interface CommandOverlay {
+  command?: string;
+  exec?: string;
+  args?: string[];
+  cwd?: string;
+  disabled?: boolean;
+  vars?: {
+    [k: string]: string | number | boolean;
   };
 }
 export interface Params {
@@ -73,24 +181,50 @@ export interface Run {
   timeout_ms?: number;
   startup_timeout_ms?: number;
   ready?: {
-    type: "process" | "tcp" | "http";
+    type: "process" | "tcp" | "http" | "command" | "log" | "file";
     port?: number;
     host?: string;
     url?: string;
     interval_ms?: number;
+    command?: string;
+    log_line?: string;
+    file?: string;
   };
   health?: {
-    type: "tcp" | "http";
+    type: "process" | "tcp" | "http" | "command" | "log" | "file";
     port?: number;
     host?: string;
     url?: string;
     interval_ms?: number;
     failure_threshold?: number;
+    command?: string;
+    log_line?: string;
+    file?: string;
   };
   restart?: {
-    max_attempts: number;
+    policy?: "always" | "on_failure" | "never" | "exit_on_failure";
+    max_attempts?: number;
     delay_ms?: number;
     backoff?: number;
+  };
+  replicas?: number;
+  ready_log_line?: string;
+  shutdown?: {
+    signal?: string;
+    timeout_ms?: number;
+    command?: string;
+  };
+  schedule?: {
+    [k: string]: unknown;
+  } & {
+    cron?: string;
+    interval_ms?: number;
+  };
+  disabled?: boolean;
+  notify?: {
+    desktop?: boolean;
+    webhook?: string;
+    after_ms?: number;
   };
   retry?: {
     attempts: number;
@@ -116,11 +250,44 @@ export interface Pipeline {
   };
   fail_fast?: boolean;
   timeout_ms?: number;
+  tags?: string[];
+  group?: string;
+  hidden?: boolean;
+  private?: boolean;
+  internal?: boolean;
+  aliases?: string[];
+  hooks?: {
+    before?: IdList;
+    after?: IdList;
+    on_success?: IdList;
+    on_failure?: IdList;
+    finally?: IdList;
+  };
 }
 export interface Step {
   uses: string;
   needs?: string[];
+  wait_for?: string[];
   with?: {
     [k: string]: string | number | boolean;
+  };
+  run?: "once" | "when_changed" | "always";
+  continue_on_error?: boolean;
+  timeout_ms?: number;
+  lock?: string;
+  optional?: boolean;
+  if?: string;
+  for?: {
+    var: string;
+    /**
+     * @minItems 1
+     */
+    values: [string | number | boolean, ...(string | number | boolean)[]];
+  };
+  matrix?: {
+    /**
+     * @minItems 1
+     */
+    [k: string]: [string | number | boolean, ...(string | number | boolean)[]];
   };
 }

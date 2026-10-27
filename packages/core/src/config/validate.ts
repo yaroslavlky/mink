@@ -15,6 +15,22 @@ export function validateReferences(config: MinkConfiguration): void {
           throw new Error(`${id}.${name}: unknown condition parameter ${p.when.param}`);
         assertParameterValue(`${id}.${name}.when`, target, p.when.equals);
       }
+      if (p.regex !== undefined) {
+        try {
+          new RegExp(p.regex);
+        } catch {
+          throw new Error(`${id}.${name}: invalid regex`);
+        }
+      }
+      if (p.min !== undefined && p.max !== undefined && p.min > p.max)
+        throw new Error(`${id}.${name}: min exceeds max`);
+      for (const required of p.requires ?? [])
+        if (!Object.hasOwn(entry.params ?? {}, required))
+          throw new Error(`${id}.${name}: unknown required parameter ${required}`);
+      if (p.positional && (p.env || p.flag))
+        throw new Error(`${id}.${name}: positional parameters cannot use env or flag`);
+      if (p.variadic && !p.positional)
+        throw new Error(`${id}.${name}: variadic requires positional`);
     }
     checkCycles(
       Object.keys(entry.params ?? {}),
@@ -37,11 +53,19 @@ export function validateReferences(config: MinkConfiguration): void {
       if (entry.exec && entry.shell) throw new Error(`${id}: exec does not use a shell`);
       if ([entry.command, entry.exec, ...(entry.args ?? [])].some((value) => value?.includes('\0')))
         throw new Error(`${id}: command and arguments cannot contain NUL`);
-      for (const dep of entry.depends_on ?? [])
-        if (!exists(dep) || entries[dep].kind !== 'command' || entries[dep].run?.mode === 'service')
+      for (const configured of entry.depends_on ?? []) {
+        const dependency = typeof configured === 'string' ? { id: configured } : configured;
+        const dep = dependency.id;
+        if (
+          !exists(dep) ||
+          entries[dep].kind !== 'command' ||
+          (entries[dep].run?.mode === 'service' &&
+            !['started', 'healthy'].includes(dependency.condition ?? ''))
+        )
           throw new Error(
             `${id}: dependency ${dep} must be a one-shot command; use pipeline needs for services`,
           );
+      }
       const run = entry.run;
       if (run?.mode !== 'service' && (run?.startup_timeout_ms || run?.ready))
         throw new Error(`${id}: startup settings require service mode`);
@@ -53,16 +77,33 @@ export function validateReferences(config: MinkConfiguration): void {
         throw new Error(`${id}: health and restart require service mode`);
       if (run?.mode === 'service' && run.retry)
         throw new Error(`${id}: use restart for services, retry for tasks`);
+      for (const name of entry.requires ?? [])
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+          throw new Error(`${id}: invalid required environment variable ${name}`);
     } else {
+      for (const [kind, configured] of Object.entries(entry.hooks ?? {}))
+        for (const hook of Array.isArray(configured) ? configured : [configured])
+          if (!exists(hook)) throw new Error(`${id}.hooks.${kind}: unknown command ${hook}`);
       for (const [stepId, step] of Object.entries(entry.steps)) {
         if (!exists(step.uses)) throw new Error(`${id}.${stepId}: unknown command ${step.uses}`);
         for (const need of step.needs ?? [])
           if (!Object.hasOwn(entry.steps, need))
             throw new Error(`${id}.${stepId}: unknown step ${need}`);
+        for (const wait of step.wait_for ?? [])
+          if (!Object.hasOwn(entry.steps, wait))
+            throw new Error(`${id}.${stepId}: unknown wait_for step ${wait}`);
         for (const [name, value] of Object.entries(step.with ?? {})) {
           const target = entries[step.uses].params?.[name];
           if (!target || !Object.hasOwn(entries[step.uses].params ?? {}, name))
             throw new Error(`${id}.${stepId}: unknown target parameter ${name}`);
+          const matrix = typeof value === 'string' && /^\$\{matrix\.([^}]+)\}$/.exec(value);
+          if (matrix) {
+            const configured =
+              step.matrix?.[matrix[1]] ??
+              (step.for?.var === matrix[1] ? step.for.values : undefined);
+            if (!configured) throw new Error(`${id}.${stepId}: unknown matrix value ${matrix[1]}`);
+            continue;
+          }
           const match = typeof value === 'string' && /^\$\{params\.([^}]+)\}$/.exec(value);
           if (match) {
             const source = entry.params?.[match[1]];
@@ -86,13 +127,26 @@ export function validateReferences(config: MinkConfiguration): void {
       checkCycles(Object.keys(entry.steps), (step) => entry.steps[step].needs ?? [], `${id}.steps`);
     }
   }
+  const names = new Set(Object.keys(entries));
+  for (const [id, entry] of Object.entries(entries))
+    for (const alias of entry.aliases ?? []) {
+      if (names.has(alias)) throw new Error(`${id}: alias conflicts with command ${alias}`);
+      names.add(alias);
+    }
   checkCycles(
     Object.keys(entries),
     (id) => {
       const e = entries[id];
       return e.kind === 'command'
-        ? (e.depends_on ?? [])
-        : Object.values(e.steps).map((s) => s.uses);
+        ? (e.depends_on ?? []).map((dependency) =>
+            typeof dependency === 'string' ? dependency : dependency.id,
+          )
+        : [
+            ...Object.values(e.steps).map((s) => s.uses),
+            ...Object.values(e.hooks ?? {}).flatMap((value) =>
+              Array.isArray(value) ? value : [value],
+            ),
+          ];
     },
     'commands',
   );

@@ -9,6 +9,7 @@ export interface PreparedCommand {
   args: string[];
   cwd?: string;
   timeoutMs?: number;
+  hiddenEnv?: string[];
 }
 export function parameterFields(
   entry: Command | Pipeline,
@@ -43,7 +44,7 @@ export function assertParameterValue(
 ): asserts value is ParameterValue {
   const valid =
     p.type === 'select'
-      ? typeof value === 'string' && p.options?.includes(value)
+      ? typeof value === 'string' && (p.options ? p.options.includes(value) : !!p.options_from)
       : p.type === 'number' || p.type === 'port'
         ? typeof value === 'number' &&
           Number.isFinite(value) &&
@@ -51,7 +52,13 @@ export function assertParameterValue(
         : p.type === 'boolean'
           ? typeof value === 'boolean'
           : typeof value === 'string' && !value.includes('\0');
-  if (!valid)
+  const bounded =
+    valid &&
+    (p.regex === undefined || (typeof value === 'string' && new RegExp(p.regex).test(value))) &&
+    (p.min === undefined || (typeof value === 'number' && value >= p.min)) &&
+    (p.max === undefined || (typeof value === 'number' && value <= p.max)) &&
+    (p.enum === undefined || p.enum.some((candidate) => candidate === value));
+  if (!bounded)
     throw new Error(
       `${label}: expected ${p.type}${p.type === 'select' ? ` (${p.options?.join(', ')})` : ''}`,
     );
@@ -85,6 +92,11 @@ export function resolveValues(
       }
     }
     const value = supplied[name] ?? p.default;
+    if (value === undefined && p.required === false) {
+      active.delete(name);
+      done.add(name);
+      return;
+    }
     if (value === undefined) throw new Error(`${label}: missing parameter ${name}`);
     assertParameterValue(`${label}.${name}`, p, value);
     result[name] = value;
@@ -92,32 +104,68 @@ export function resolveValues(
     done.add(name);
   }
   for (const name of Object.keys(params)) visit(name);
+  for (const [name, parameter] of Object.entries(params))
+    if (
+      Object.hasOwn(result, name) &&
+      parameter.requires?.some((required) => !Object.hasOwn(result, required))
+    )
+      throw new Error(`${label}.${name}: requires ${parameter.requires!.join(', ')}`);
   return result;
 }
 export function prepareEntry(
   entry: Command,
   values: Record<string, ParameterValue>,
   directory?: string,
+  baseEnv: Record<string, string> = {},
+  hiddenEnv: string[] = [],
 ): PreparedCommand {
-  const env: Record<string, string> = Object.create(null),
+  const env: Record<string, string> = { ...baseEnv },
     args: string[] = [...(entry.args ?? [])];
   const cwd = directory && resolve(directory, entry.cwd ?? '.');
   for (const [name, value] of Object.entries(values)) {
     const p = entry.params![name];
     if (p.env) env[p.env] = p.type === 'path' && cwd ? resolve(cwd, String(value)) : String(value);
+    if (p.positional) {
+      if (p.variadic) args.push(...String(value).split(',').filter(Boolean));
+      else args.push(String(value));
+    }
     if (p.flag && (p.type !== 'boolean' || value)) {
       args.push(p.flag);
       if (p.type !== 'boolean') args.push(String(value));
     }
   }
+  let executable = entry.exec;
+  if (entry.runner && entry.runner !== 'local') {
+    if (!executable) throw new Error('Remote runners require exec instead of a shell command');
+    if (entry.runner.type === 'ssh') {
+      if (!entry.runner.target) throw new Error('ssh runner requires target');
+      args.unshift(entry.runner.target, executable);
+      executable = 'ssh';
+    } else if (entry.runner.type === 'docker') {
+      if (!entry.runner.image) throw new Error('docker runner requires image');
+      args.unshift('run', '--rm', entry.runner.image, executable);
+      executable = 'docker';
+    } else {
+      args.unshift('exec', '--workspace-folder', cwd ?? process.cwd(), executable);
+      executable = 'devcontainer';
+    }
+  }
   return {
-    command: entry.command ?? entry.exec!,
-    executable: entry.exec,
+    command: entry.command ?? executable!,
+    executable,
     shell: entry.shell,
     env,
     args,
     cwd,
     timeoutMs: entry.run?.timeout_ms,
+    hiddenEnv: [
+      ...new Set([
+        ...hiddenEnv,
+        ...Object.values(entry.params ?? {})
+          .filter((parameter) => parameter.type === 'secret' && parameter.env)
+          .map((parameter) => parameter.env!),
+      ]),
+    ],
   };
 }
 export function resolveCommand(

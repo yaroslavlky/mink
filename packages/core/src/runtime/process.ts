@@ -1,4 +1,6 @@
 import { createConnection } from 'node:net';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ExecutionPlan } from '../commands/plan.js';
 import { spawnOwned } from './platform.js';
@@ -14,6 +16,7 @@ export interface RunResult {
   steps?: Record<string, RunResult>;
   attempts?: number;
   reused?: boolean;
+  cached?: boolean;
 }
 export interface RunEvent {
   type: 'start' | 'stdout' | 'stderr' | 'ready' | 'finish' | 'health' | 'restart';
@@ -30,6 +33,11 @@ export interface RunOptions {
   onEvent?: (event: RunEvent) => void;
   stdin?: 'inherit' | 'ignore';
   retryFailed?: RunResult;
+  force?: boolean;
+  args?: string[];
+  approved?: boolean;
+  concurrency?: number;
+  continueOnError?: boolean;
 }
 export interface ProcessHandle {
   instance: string;
@@ -42,10 +50,15 @@ export interface ProcessHandle {
   stop: (force?: boolean) => void;
   plan: ExecutionPlan;
   options: RunOptions;
+  readonly restarts: number;
+  readonly healthHistory: Array<{ time: number; healthy: boolean }>;
 }
 
 export type ServiceInfo = Readonly<
-  Pick<ProcessHandle, 'instance' | 'id' | 'state' | 'started' | 'url' | 'completion'>
+  Pick<
+    ProcessHandle,
+    'instance' | 'id' | 'state' | 'started' | 'url' | 'completion' | 'restarts' | 'healthHistory'
+  >
 >;
 
 export function startProcess(
@@ -57,7 +70,9 @@ export function startProcess(
   restartSlot?: (signal: AbortSignal) => Promise<() => void>,
 ): ProcessHandle {
   const policy = plan.entry?.run?.restart;
-  if (!policy) return startSingleProcess(plan, runId, instance, options, notify);
+  if (!policy || policy.policy === 'never')
+    return startSingleProcess(plan, runId, instance, options, notify);
+  const maxAttempts = policy.max_attempts ?? 3;
   const started = Date.now();
   const controller = new AbortController();
   const signal = options.signal
@@ -65,6 +80,7 @@ export function startProcess(
     : controller.signal;
   let current: ProcessHandle | undefined;
   let state: ProcessHandle['state'] | undefined;
+  let attempt = 0;
   let force = false,
     everReady = false;
   let ready!: (result: RunResult) => void;
@@ -79,9 +95,8 @@ export function startProcess(
       timedOut: false,
       state: 'cancelled',
     };
-    let attempt = 0;
     try {
-      for (; attempt <= policy.max_attempts && !signal.aborted; attempt++) {
+      for (; attempt <= maxAttempts && !signal.aborted; attempt++) {
         if (attempt) {
           state = 'starting';
           await delay(
@@ -105,7 +120,8 @@ export function startProcess(
           release?.();
         }
         result = await current!.completion;
-        if (result.state !== 'failed') break;
+        if (policy.policy !== 'always' && result.state !== 'failed') break;
+        if (policy.policy === 'exit_on_failure') break;
       }
     } catch (error) {
       result = {
@@ -119,7 +135,7 @@ export function startProcess(
     result = {
       ...result,
       durationMs: Date.now() - started,
-      attempts: Math.min(attempt + 1, policy.max_attempts + 1),
+      attempts: Math.min(attempt + 1, maxAttempts + 1),
     };
     ready(result);
     return result;
@@ -136,6 +152,12 @@ export function startProcess(
     completion,
     plan,
     options,
+    get restarts() {
+      return Math.max(0, attempt);
+    },
+    get healthHistory() {
+      return current?.healthHistory ?? [];
+    },
     stop(immediate = false) {
       if (state === 'failed' || state === 'stopped') return;
       force ||= immediate;
@@ -163,6 +185,7 @@ function startSingleProcess(
     finished = false,
     isReady = false;
   let failure: string | undefined;
+  let observedOutput = '';
   let timer: ReturnType<typeof setTimeout> | undefined,
     escalation: ReturnType<typeof setTimeout> | undefined;
   let complete!: (result: RunResult) => void, ready!: (result: RunResult) => void;
@@ -185,10 +208,13 @@ function startSingleProcess(
     stop,
     plan,
     options,
+    restarts: 0,
+    healthHistory: [],
   };
-  const child = spawnOwned(prepared, options.stdin ?? 'ignore', (stream, chunk) =>
-    emit(stream, { chunk }),
-  );
+  const child = spawnOwned(prepared, options.stdin ?? 'ignore', (stream, chunk) => {
+    observedOutput = (observedOutput + chunk).slice(-65536);
+    emit(stream, { chunk });
+  });
   function stop(force = false): void {
     if (finished) return;
     cancelled = !timedOut;
@@ -246,10 +272,14 @@ function startSingleProcess(
     if (service) void waitUntilReady();
   });
   async function waitUntilReady(): Promise<void> {
-    const check = entry.run?.ready;
+    const check =
+      entry.run?.ready ??
+      (entry.run?.ready_log_line
+        ? ({ type: 'log', log_line: entry.run.ready_log_line } as const)
+        : undefined);
     try {
       while (!finished && !probeAbort.signal.aborted) {
-        const ok = !check || (await probe(check, probeAbort.signal));
+        const ok = !check || (await probe(check, probeAbort.signal, prepared.cwd, observedOutput));
         if (finished || handle.state === 'stopping') return;
         if (ok) {
           isReady = true;
@@ -267,7 +297,9 @@ function startSingleProcess(
           if (entry.run?.health) void monitorHealth();
           return;
         }
-        await delay(check?.interval_ms ?? 100, undefined, { signal: probeAbort.signal });
+        await delay(('interval_ms' in check ? check.interval_ms : undefined) ?? 100, undefined, {
+          signal: probeAbort.signal,
+        });
       }
     } catch (error) {
       if (!probeAbort.signal.aborted) {
@@ -282,13 +314,15 @@ function startSingleProcess(
     try {
       while (!probeAbort.signal.aborted) {
         await delay(check.interval_ms ?? 1000, undefined, { signal: probeAbort.signal });
-        const healthy = await probe(check, probeAbort.signal);
+        const healthy = await probe(check, probeAbort.signal, prepared.cwd, observedOutput);
         if (finished || handle.state === 'stopping') return;
         failures = healthy ? 0 : failures + 1;
         if (!healthy && failures < (check.failure_threshold ?? 3)) continue;
         const next = healthy ? 'ready' : 'unhealthy';
         if (handle.state !== next) {
           handle.state = next;
+          handle.healthHistory.push({ time: Date.now(), healthy });
+          if (handle.healthHistory.length > 100) handle.healthHistory.shift();
           emit('health', { healthy });
         }
         if (!healthy && entry.run?.restart) {
@@ -308,9 +342,22 @@ function startSingleProcess(
 async function probe(
   check: NonNullable<NonNullable<ExecutionPlan['entry']>['run']>['ready'],
   signal: AbortSignal,
+  cwd?: string,
+  output = '',
 ): Promise<boolean> {
   if (!check || check.type === 'process') return true;
   if (check.type === 'tcp') return tcpReady(check.host ?? '127.0.0.1', check.port!, signal);
+  if (check.type === 'file') return existsSync(resolve(cwd ?? process.cwd(), check.file!));
+  if (check.type === 'log') return output.includes(check.log_line!);
+  if (check.type === 'command') {
+    const handle = spawnOwned(
+      { command: check.command!, args: [], env: {}, cwd },
+      'ignore',
+      () => {},
+    );
+    const result = await handle.completion;
+    return result.code === 0;
+  }
   try {
     const response = await fetch(check.url!, {
       signal: AbortSignal.any([signal, AbortSignal.timeout(500)]),

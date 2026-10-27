@@ -1,5 +1,15 @@
 # @yaroslavlky/mink-tui
 
+## 0.9.0
+
+### Minor Changes
+
+- Integrate the expanded core execution, service, event, accessibility, and redaction contracts.
+
+### Updated Dependencies
+
+- @yaroslavlky/mink-core@0.9.0
+
 ## 0.2.0
 
 ### Minor Changes

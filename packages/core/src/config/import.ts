@@ -15,6 +15,14 @@ export const projectFiles = [
   'compose.yaml',
   'docker-compose.yml',
   'docker-compose.yaml',
+  'justfile',
+  '.mise.toml',
+  'Procfile',
+  'process-compose.yaml',
+  'Cargo.toml',
+  'pyproject.toml',
+  'go.mod',
+  'deno.json',
 ];
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -85,5 +93,93 @@ export async function importTasks(directory: string): Promise<Record<string, Com
           args: ['compose', '--file', compose, 'up', '--detach', name],
         };
   }
+  const just = await first(['justfile', 'Justfile']);
+  if (just)
+    for (const line of (await readFile(join(directory, just), 'utf8')).split(/\r?\n/)) {
+      const match = /^([A-Za-z_][\w-]*)[^:=]*:/.exec(line);
+      if (match)
+        entries[`just:${match[1]}`] = {
+          kind: 'command',
+          name: `just ${match[1]}`,
+          exec: 'just',
+          args: ['--justfile', just, match[1]],
+        };
+    }
+  const procfile = await first(['Procfile']);
+  if (procfile)
+    for (const line of (await readFile(join(directory, procfile), 'utf8')).split(/\r?\n/)) {
+      const match = /^([A-Za-z_][\w-]*):\s*(.+)$/.exec(line);
+      if (match)
+        entries[`procfile:${match[1]}`] = {
+          kind: 'command',
+          name: `Procfile ${match[1]}`,
+          command: match[2],
+          run: { mode: 'service' },
+        };
+    }
+  const deno = await first(['deno.json', 'deno.jsonc']);
+  if (deno) {
+    const data = JSON.parse(
+      (await readFile(join(directory, deno), 'utf8')).replace(/^\s*\/\/.*$/gm, ''),
+    ) as { tasks?: Record<string, string> };
+    for (const [name, task] of Object.entries(data.tasks ?? {}))
+      entries[`deno:${name}`] = {
+        kind: 'command',
+        name: `deno task ${name}`,
+        description: task,
+        exec: 'deno',
+        args: ['task', name],
+      };
+  }
+  const processCompose = await first(['process-compose.yaml', 'process-compose.yml']);
+  if (processCompose) {
+    const data = load(await readFile(join(directory, processCompose), 'utf8')) as {
+      processes?: Record<string, { command?: unknown }>;
+    };
+    for (const [name, process] of Object.entries(data.processes ?? {}))
+      if (typeof process.command === 'string')
+        entries[`process-compose:${name}`] = {
+          kind: 'command',
+          name,
+          command: process.command,
+          run: { mode: 'service' },
+        };
+  }
+  const mise = await first(['.mise.toml', 'mise.toml']);
+  if (mise) {
+    const text = await readFile(join(directory, mise), 'utf8');
+    for (const match of text.matchAll(/^\[tasks\.([A-Za-z_][\w-]*)\]/gm))
+      entries[`mise:${match[1]}`] = {
+        kind: 'command',
+        name: `mise run ${match[1]}`,
+        exec: 'mise',
+        args: ['run', match[1]],
+      };
+  }
+  const pyproject = await first(['pyproject.toml']);
+  if (pyproject) {
+    const text = await readFile(join(directory, pyproject), 'utf8');
+    const section =
+      /\[(?:project\.scripts|tool\.poetry\.scripts)\]([\s\S]*?)(?=\n\[|$)/.exec(text)?.[1] ?? '';
+    for (const match of section.matchAll(/^([A-Za-z_][\w-]*)\s*=\s*['"]([^:'"]+)/gm))
+      entries[`python:${match[1]}`] = {
+        kind: 'command',
+        name: match[1],
+        exec: 'python',
+        args: ['-m', match[2]],
+      };
+  }
+  for (const [file, tool, actions] of [
+    ['Cargo.toml', 'cargo', ['build', 'test', 'run']],
+    ['go.mod', 'go', ['build', 'test', 'run']],
+  ] as const)
+    if (await exists(join(directory, file)))
+      for (const action of actions)
+        entries[`${tool}:${action}`] = {
+          kind: 'command',
+          name: `${tool} ${action}`,
+          exec: tool,
+          args: [action, ...(tool === 'go' && action === 'test' ? ['./...'] : [])],
+        };
   return entries;
 }

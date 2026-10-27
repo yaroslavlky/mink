@@ -8,6 +8,11 @@ import {
   type RunOptions,
   type RunResult,
 } from './process.js';
+import type { CacheStore } from './cache.js';
+
+interface SessionOptions extends RunOptions {
+  cache?: CacheStore;
+}
 
 const outcome = (state: 'skipped' | 'cancelled'): RunResult => ({
   exitCode: null,
@@ -21,7 +26,9 @@ export class Session {
   private processes = new Map<string, ProcessHandle>();
   private listeners = new Set<(event: RunEvent) => void>();
   private controllers = new Set<AbortController>();
-  private reservedServices = new Set<string>();
+  private reservedServices = new Map<string, number>();
+  private locks = new Map<string, Slots>();
+  private runningRoots = new Set<string>();
   private disposed = false;
   subscribe(listener: (event: RunEvent) => void): () => void {
     this.listeners.add(listener);
@@ -39,27 +46,33 @@ export class Session {
       }
     }
   };
-  async run(root: ExecutionPlan, options: RunOptions = {}): Promise<RunResult> {
+  async run(root: ExecutionPlan, options: SessionOptions = {}): Promise<RunResult> {
     if (this.disposed) throw new Error('Mink session is disposed');
-    const serviceIds = new Set(
-      this.services()
-        .filter((p) => ['ready', 'unhealthy', 'starting', 'stopping'].includes(p.state))
-        .map((p) => p.id),
-    );
-    for (const id of this.reservedServices) serviceIds.add(id);
+    if (root.entry && root.entry.run?.mode !== 'service' && this.runningRoots.has(root.id))
+      throw new Error(`Command ${root.id} is already running`);
+    const serviceCounts = new Map<string, number>();
+    for (const service of this.services().filter((p) =>
+      ['ready', 'unhealthy', 'starting', 'stopping'].includes(p.state),
+    ))
+      serviceCounts.set(service.id, (serviceCounts.get(service.id) ?? 0) + 1);
+    for (const [id, count] of this.reservedServices)
+      serviceCounts.set(id, (serviceCounts.get(id) ?? 0) + count);
     const reservations: string[] = [];
     const inspect = (plan: ExecutionPlan): void => {
       if (plan.entry?.run?.mode === 'service') {
-        if (serviceIds.has(plan.id))
+        const count = serviceCounts.get(plan.id) ?? 0;
+        if (count >= (plan.entry.run.replicas ?? 1))
           throw new Error(`Service ${plan.id} is already scheduled or running; use restart`);
-        serviceIds.add(plan.id);
+        serviceCounts.set(plan.id, count + 1);
         reservations.push(plan.id);
       }
       for (const p of plan.dependencies) inspect(p);
       for (const s of Object.values(plan.steps)) inspect(s.plan);
     };
     inspect(root);
-    for (const id of reservations) this.reservedServices.add(id);
+    if (root.entry) this.runningRoots.add(root.id);
+    for (const id of reservations)
+      this.reservedServices.set(id, (this.reservedServices.get(id) ?? 0) + 1);
     const started = Date.now(),
       runId = randomUUID(),
       controller = new AbortController();
@@ -67,11 +80,14 @@ export class Session {
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
-    const pool = new Slots(root.maxParallel),
-      dependencyRuns = new Map<string, Promise<RunResult>>();
+    if (options.continueOnError) root.failFast = false;
+    const pool = new Slots(options.concurrency ?? root.maxParallel),
+      dependencyRuns = new Map<string, Promise<RunResult>>(),
+      onceRuns = new Map<string, Promise<RunResult>>();
     const dependencyController = new AbortController();
     let dependencySignal = AbortSignal.any([signal, dependencyController.signal]);
     const notify = (event: RunEvent) => {
+      options.cache?.observe(event);
       this.emit(event);
       try {
         options.onEvent?.(event);
@@ -95,16 +111,43 @@ export class Session {
             }, plan.timeoutMs)
           : undefined;
         const runs = new Map<string, Promise<RunResult>>();
+        const hookResults: Array<[string, RunResult]> = [];
+        const hooks = async (
+          kind: 'before' | 'after' | 'on_success' | 'on_failure' | 'finally',
+          hookSignal: AbortSignal,
+        ) => {
+          let ok = true;
+          for (const [index, hook] of (plan.hooks?.[kind] ?? []).entries()) {
+            const result = await execute(hook, hookSignal);
+            hookResults.push([`hook:${kind}:${index + 1}`, result]);
+            ok &&= successful(result);
+          }
+          return ok;
+        };
         const step = (id: string): Promise<RunResult> => {
           if (!runs.has(id))
             runs.set(
               id,
               (async () => {
+                await Promise.all(plan.steps[id].waitFor.map(step));
                 const needs = await Promise.all(plan.steps[id].needs.map(step));
                 if (branchSignal.aborted) return outcome('cancelled');
-                if (needs.some((r) => !successful(r))) return outcome('skipped');
+                if (
+                  needs.some(
+                    (result, index) =>
+                      !successful(result) &&
+                      !plan.steps[plan.steps[id].needs[index]].continueOnError &&
+                      !plan.steps[plan.steps[id].needs[index]].optional,
+                  )
+                )
+                  return outcome('skipped');
                 const result = await execute(plan.steps[id].plan, branchSignal);
-                if (result.state === 'failed' && plan.failFast) {
+                if (
+                  result.state === 'failed' &&
+                  plan.failFast &&
+                  !plan.steps[id].continueOnError &&
+                  !plan.steps[id].optional
+                ) {
                   failed = true;
                   branch.abort();
                 }
@@ -115,10 +158,26 @@ export class Session {
         };
         const begin = Date.now(),
           names = Object.keys(plan.steps),
-          results = await Promise.all(names.map(step)).finally(() => {
+          beforeOk = await hooks('before', branchSignal),
+          results = await (
+            beforeOk
+              ? Promise.all(names.map(step))
+              : Promise.resolve(names.map(() => outcome('skipped')))
+          ).finally(() => {
             if (deadline) clearTimeout(deadline);
           });
-        const success = results.every(successful);
+        let success =
+          beforeOk &&
+          results.every(
+            (result, index) =>
+              successful(result) ||
+              plan.steps[names[index]].continueOnError ||
+              plan.steps[names[index]].optional,
+          );
+        success = (await hooks('after', scope)) && success;
+        success = (await hooks(success ? 'on_success' : 'on_failure', scope)) && success;
+        const cleanupSignal = new AbortController().signal;
+        success = (await hooks('finally', cleanupSignal)) && success;
         return {
           exitCode: success ? 0 : 1,
           signal: null,
@@ -129,65 +188,113 @@ export class Session {
             : !failed && !timedOut && success
               ? 'succeeded'
               : 'failed',
-          steps: Object.fromEntries(names.map((name, i) => [name, results[i]])),
+          steps: Object.fromEntries([
+            ...names.map((name, i) => [name, results[i]] as const),
+            ...hookResults,
+          ]),
         };
       }
-      for (const dep of plan.dependencies) {
+      for (const [index, dep] of plan.dependencies.entries()) {
         if (!dependencyRuns.has(dep.key))
           dependencyRuns.set(dep.key, execute(dep, dependencySignal));
         const result = await untilCancelled(dependencyRuns.get(dep.key)!, scope);
-        if (!successful(result))
+        const rule = plan.dependencyRules[index];
+        const accepted =
+          rule.condition === 'failed'
+            ? result.state === 'failed'
+            : rule.condition === 'completed_successfully'
+              ? result.state === 'succeeded'
+              : successful(result);
+        if (!accepted && !rule.optional)
           return { ...result, state: scope.aborted ? 'cancelled' : 'failed' };
+      }
+      if (plan.policy === 'once') {
+        const key = JSON.stringify({
+          id: plan.id,
+          command: plan.prepared?.command,
+          args: plan.prepared?.args,
+          env: plan.prepared?.env,
+        });
+        const reused = onceRuns.has(key);
+        if (!reused) onceRuns.set(key, execute({ ...plan, policy: undefined }, scope));
+        const result = await untilCancelled(onceRuns.get(key)!, scope);
+        return reused ? { ...result, reused: true } : result;
+      }
+      if (!options.force && plan.policy !== 'always') {
+        const cached = await options.cache?.lookup(plan);
+        if (cached?.entry) {
+          for (const event of cached.entry.events)
+            notify({
+              type: event.type,
+              runId,
+              instance: `${runId}:${plan.key}`,
+              id: plan.id,
+              time: Date.now(),
+              ...(event.chunk ? { chunk: event.chunk } : {}),
+            });
+          return { ...cached.entry.result, durationMs: 0, cached: true };
+        }
       }
       const retry = plan.entry.run?.retry;
       const begin = Date.now();
-      for (let attempt = 1; attempt <= (retry?.attempts ?? 1); attempt++) {
-        if (!(await pool.acquire(scope))) return outcome('cancelled');
-        let result: RunResult;
-        try {
-          if (scope.aborted) return outcome('cancelled');
-          const instance = `${runId}:${plan.key}`;
-          const handle = startProcess(
-            plan,
-            runId,
-            instance,
-            { ...options, signal: scope },
-            notify,
-            async (restartSignal) => {
-              if (!(await pool.acquire(restartSignal)))
-                throw new Error('Service restart cancelled');
-              return () => pool.release();
-            },
-          );
-          if (plan.entry.run?.mode === 'service') {
-            for (const [key, old] of this.processes) {
-              if (old.id === plan.id && ['stopped', 'failed'].includes(old.state))
-                this.processes.delete(key);
+      const lockName = plan.lock;
+      if (lockName && !this.locks.has(lockName)) this.locks.set(lockName, new Slots(1));
+      const lock = lockName ? this.locks.get(lockName)! : undefined;
+      if (lock && !(await lock.acquire(scope))) return outcome('cancelled');
+      try {
+        for (let attempt = 1; attempt <= (retry?.attempts ?? 1); attempt++) {
+          if (!(await pool.acquire(scope))) return outcome('cancelled');
+          let result: RunResult;
+          try {
+            if (scope.aborted) return outcome('cancelled');
+            const instance = `${runId}:${plan.key}`;
+            const handle = startProcess(
+              plan,
+              runId,
+              instance,
+              { ...options, signal: scope },
+              notify,
+              async (restartSignal) => {
+                if (!(await pool.acquire(restartSignal)))
+                  throw new Error('Service restart cancelled');
+                return () => pool.release();
+              },
+            );
+            if (plan.entry.run?.mode === 'service') {
+              for (const [key, old] of this.processes) {
+                if (old.id === plan.id && ['stopped', 'failed'].includes(old.state))
+                  this.processes.delete(key);
+              }
             }
+            this.processes.set(instance, handle);
+            void handle.completion.then(() => {
+              if (plan.entry?.run?.mode !== 'service') this.processes.delete(instance);
+            });
+            result = await handle.ready;
+          } finally {
+            pool.release();
           }
-          this.processes.set(instance, handle);
-          void handle.completion.then(() => {
-            if (plan.entry?.run?.mode !== 'service') this.processes.delete(instance);
-          });
-          result = await handle.ready;
-        } finally {
-          pool.release();
+          await options.cache?.store(plan, `${runId}:${plan.key}`, result);
+          if (result.state !== 'failed' || attempt === (retry?.attempts ?? 1))
+            return {
+              ...result,
+              durationMs: Date.now() - begin,
+              ...(retry ? { attempts: attempt } : {}),
+            };
+          try {
+            const base = Math.min(
+              60000,
+              (retry?.delay_ms ?? 100) * (retry?.backoff ?? 2) ** (attempt - 1),
+            );
+            await delay(base + Math.floor(Math.random() * Math.max(1, base * 0.2)), undefined, {
+              signal: scope,
+            });
+          } catch {
+            return outcome('cancelled');
+          }
         }
-        if (result.state !== 'failed' || attempt === (retry?.attempts ?? 1))
-          return {
-            ...result,
-            durationMs: Date.now() - begin,
-            ...(retry ? { attempts: attempt } : {}),
-          };
-        try {
-          await delay(
-            Math.min(60000, (retry?.delay_ms ?? 100) * (retry?.backoff ?? 2) ** (attempt - 1)),
-            undefined,
-            { signal: scope },
-          );
-        } catch {
-          return outcome('cancelled');
-        }
+      } finally {
+        lock?.release();
       }
       return outcome('cancelled');
     };
@@ -201,7 +308,12 @@ export class Session {
     } finally {
       dependencyController.abort();
       // Services retain their controller until session disposal.
-      for (const id of reservations) this.reservedServices.delete(id);
+      for (const id of reservations) {
+        const count = (this.reservedServices.get(id) ?? 1) - 1;
+        if (count) this.reservedServices.set(id, count);
+        else this.reservedServices.delete(id);
+      }
+      if (root.entry) this.runningRoots.delete(root.id);
       const live = this.services().filter(
         (p) =>
           p.instance.startsWith(runId) &&

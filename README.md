@@ -54,13 +54,23 @@ Do not put secrets in `mink.yml`; reference them through secret parameters or en
 
 ## What it does
 
-- A CLI with `ui`, `list`, `check`, `run`, `init`, `preset`, `favorite`, `doctor`, `plan`, and `watch`.
+- A CLI with cached workflows, graph and environment inspection, and a per-project supervisor for detached services, logs, events, scaling, and run history.
+- A permission-aware stdio MCP server with redacted plans, bounded runs, resources, prompts, reports, and structured failure explanations.
+- Workspace dependency graphs, affected/filter selection, namespaced config composition, deep dry-runs, critical-chain analysis, signed remote-cache providers, and repository pruning.
+- Trusted plugin contracts, broad static task discovery, portable runners, typed configuration helpers, Git hooks, tool requirements, imports, and starter templates.
+- Non-interactive CI with JUnit, GitHub summaries and explicit OpenTelemetry export; standalone-binary packaging and a thin VS Code client.
+
+Mink performs no anonymous telemetry. Network activity only occurs for explicit configured features.
+
 - Fuzzy command search, favourites, history, typed forms, command previews, and foreground stdin.
 - YAML and JSON Schema validation before execution, with cycle and reference checks.
 - Typed `string`, `number`, `boolean`, `select`, `port`, `path`, and `secret` parameters, defaults, conditions, and presets.
 - Nested DAG pipelines with shared prerequisites, bounded concurrency, retries, timeouts, and failed-branch reruns.
 - Streamed stdout and stderr, cancellation, timeouts, JSONL logs with secret redaction, and POSIX process groups or Windows Job Objects.
 - Services with process/TCP/HTTP readiness, continuous health checks, bounded restarts, logs, stop/restart/kill, and health URLs.
+- Content-addressed local caching for commands that declare `sources`, with `mink why`, `mink cache`, and `--force`.
+- Profiles, layered env files, per-OS overrides, aliases, selectors, confirmations, matrices, hooks, conditions, locks, and passthrough arguments.
+- Graph, environment, formatting, linting, explanation, summary, fuzzy choice, shell completion, upgrade, and global-config commands with JSON output.
 
 ## Example configuration
 

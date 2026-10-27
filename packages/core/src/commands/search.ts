@@ -18,16 +18,18 @@ interface SearchDocument {
 }
 
 export function createCommandSearch(config: MinkConfiguration) {
-  const documents: SearchDocument[] = Object.entries(config.commands).map(([id, entry]) => ({
-    id,
-    name: entry.name,
-    description: entry.description ?? '',
-    command:
-      entry.kind === 'command'
-        ? (entry.command ?? [entry.exec, ...(entry.args ?? [])].join(' '))
-        : '',
-    entry,
-  }));
+  const documents: SearchDocument[] = Object.entries(config.commands)
+    .filter(([, entry]) => !entry.hidden && !entry.private && !entry.internal)
+    .map(([id, entry]) => ({
+      id,
+      name: entry.name,
+      description: entry.description ?? '',
+      command:
+        entry.kind === 'command'
+          ? (entry.command ?? [entry.exec, ...(entry.args ?? [])].join(' '))
+          : '',
+      entry,
+    }));
   const fuse = new Fuse(documents, {
     useTokenSearch: true,
     tokenMatch: 'all',

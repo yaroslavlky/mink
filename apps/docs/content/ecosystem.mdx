@@ -1,0 +1,13 @@
+---
+title: Ecosystem
+---
+
+# Extend Mink without changing execution semantics
+
+Core exports typed plugin contracts for discovery, parameter sources, runners, secret providers, and notifiers. `loadPlugins` accepts npm package names only after those exact names are present in its trusted set and rejects duplicate providers. `defineConfig` provides the same `MinkConfiguration` contract for typed configuration modules.
+
+Static discovery understands package scripts, Make, Task, Compose, just, mise, Procfile, process-compose, Deno tasks, and conventional Cargo, Python, and Go commands. `mink import` writes the discovered result to `mink.yml` without evaluating task files.
+
+Command `runner` supports local execution plus minimal SSH, Docker, and Dev Container wrappers. Dynamic parameter sources cover Git branches/tags, Docker and Kubernetes contexts, file globs, and an argv-based executable. Secret providers share the core redaction boundary; environment-backed secrets remain built in, while keychain, 1Password, and Vault integrations belong in trusted plugins.
+
+Declare `requires_tools` to have `mink doctor` check required executables and document their version constraints. `mink hooks install --yes --pre-commit test --pre-push test` creates non-overwriting Git hooks that use affected selection. `mink init --template <node|python|rust|go|monorepo|compose-stack>` creates a validated starter configuration.

@@ -1,0 +1,17 @@
+---
+title: Compatibility and privacy
+---
+
+# Stable configuration contract
+
+Mink 0.9 accepts `version: 1` and freezes that configuration shape ahead of 1.0. Additive fields and new commands may arrive in minor releases. Existing fields do not change meaning; removals, incompatible defaults, or stricter requirements need a new configuration version and a migration guide. Unknown fields remain validation errors so spelling mistakes cannot silently change execution.
+
+CLI JSON objects carry `formatVersion: 1`. Supervisor and MCP errors use stable codes plus human-readable messages. Consumers should ignore additive object fields and must not depend on terminal prose. Cross-platform behavior targets Node.js 24 or newer on Windows, Linux, and macOS.
+
+## Privacy
+
+Mink has no telemetry by default: it does not collect, retain, or send anonymous usage data. The only network operations are explicit user actions such as `mink upgrade`, configured HTTP probes, webhooks, remote cache, OpenTelemetry export, or trusted plugins. Secrets are redacted from plans, logs, caches, events, reports, MCP responses, and CI output.
+
+## Distribution
+
+Release automation can build Node SEA executables. Homebrew, Scoop, and winget manifests live in `packaging/`; release jobs replace checksum placeholders with signed artifact hashes. The VS Code extension is a thin supervisor/CLI client for command trees, execution, service status, and logs.

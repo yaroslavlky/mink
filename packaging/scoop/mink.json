@@ -1,0 +1,21 @@
+{
+  "version": "0.9.0",
+  "description": "Repository control center",
+  "homepage": "https://github.com/yaroslavlky/mink",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/yaroslavlky/mink/releases/download/v0.9.0/mink-windows-x64.zip",
+      "hash": "RELEASE_SHA256"
+    }
+  },
+  "bin": "mink.exe",
+  "checkver": "github",
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/yaroslavlky/mink/releases/download/v$version/mink-windows-x64.zip"
+      }
+    }
+  }
+}
