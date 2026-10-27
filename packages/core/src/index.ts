@@ -113,6 +113,7 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
       loaded.hiddenEnvironment,
     );
   const pendingRuns = new Set<Promise<RunResult>>();
+  const runningRequests = new Set<string>();
   return {
     configFile: loaded.file,
     directory: loaded.directory,
@@ -126,6 +127,10 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
     },
     plan: makePlan,
     run(id, values = {}, runOptions = {}) {
+      const requested = canonical(id);
+      if (runningRequests.has(requested))
+        return Promise.reject(new Error(`Command ${requested} is already scheduled or running`));
+      runningRequests.add(requested);
       const pending = (async () => {
         if (!loaded.discovered) await trust.assertTrusted();
         const fullPlan = makePlan(id, values);
@@ -167,8 +172,14 @@ export async function createMink(options: MinkOptions = {}): Promise<Mink> {
       })();
       pendingRuns.add(pending);
       void pending.then(
-        () => pendingRuns.delete(pending),
-        () => pendingRuns.delete(pending),
+        () => {
+          pendingRuns.delete(pending);
+          runningRequests.delete(requested);
+        },
+        () => {
+          pendingRuns.delete(pending);
+          runningRequests.delete(requested);
+        },
       );
       return pending;
     },
