@@ -1,7 +1,7 @@
 class Mink < Formula
   desc "Repository control center"
   homepage "https://github.com/yaroslavlky/mink"
-  version "1.0.0"
+  version "0.9.0"
   license "MIT"
   on_macos do
     url "https://github.com/yaroslavlky/mink/releases/download/v#{version}/mink-darwin-#{Hardware::CPU.arch}.tar.gz"

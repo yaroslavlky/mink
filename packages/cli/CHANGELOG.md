@@ -1,5 +1,18 @@
 # @yaroslavlky/mink
 
+## 0.9.0
+
+### Minor Changes
+
+- Add cache, trust, graph, environment, supervisor, MCP, monorepo, ecosystem, reporting, CI,
+  completion, configuration, and distribution commands with JSON output contracts.
+
+### Updated Dependencies
+
+- @yaroslavlky/mink-core@0.9.0
+- @yaroslavlky/mink-tui@0.9.0
+- @yaroslavlky/mink-mcp@0.9.0
+
 ## 0.2.0
 
 ### Minor Changes

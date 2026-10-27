@@ -1,5 +1,13 @@
 # @yaroslavlky/mink-core
 
+## 0.9.0
+
+### Minor Changes
+
+- Add incremental caching, trust, profiles, selectors, advanced pipelines, the persistent
+  supervisor contract, monorepo workflows, agent-safe reporting, plugin interfaces, runners,
+  CI reporting, and compatibility guarantees while preserving configuration version 1.
+
 ## 0.2.0
 
 ### Minor Changes
