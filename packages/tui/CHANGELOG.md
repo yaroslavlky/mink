@@ -1,5 +1,12 @@
 # @yaroslavlky/mink-tui
 
+## 0.9.2
+
+### Patch Changes
+
+- 5b40d70: Improve terminal mouse navigation and return to the command list after starting a job.
+  - @yaroslavlky/mink-core@0.9.2
+
 ## 0.9.0
 
 ### Minor Changes

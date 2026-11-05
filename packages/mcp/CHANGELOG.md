@@ -1,5 +1,11 @@
 # @yaroslavlky/mink-mcp
 
+## 0.9.2
+
+### Patch Changes
+
+- @yaroslavlky/mink-core@0.9.2
+
 ## 0.9.0
 
 ### Minor Changes

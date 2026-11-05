@@ -1,5 +1,14 @@
 # @yaroslavlky/mink
 
+## 0.9.2
+
+### Patch Changes
+
+- Updated dependencies [5b40d70]
+  - @yaroslavlky/mink-tui@0.9.2
+  - @yaroslavlky/mink-core@0.9.2
+  - @yaroslavlky/mink-mcp@0.9.2
+
 ## 0.9.0
 
 ### Minor Changes
