@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { useRef, useState } from 'react';
+import { Box, Text, measureElement, useInput, type DOMElement } from 'ink';
+import { useMouse } from '../hooks/use-mouse.js';
 import type { CommandSearchResult, LocalState } from '@yaroslavlky/mink-core';
 import { safeText } from '../actions.js';
 import { commandKind, rankCommands } from '../model/commands.js';
@@ -37,6 +38,18 @@ export function PaletteScreen({
   const listWidth = viewport.wide ? Math.floor(viewport.width * 0.56) : viewport.width;
   const visible = Math.max(1, listHeight - 7),
     offset = Math.max(0, selected - visible + 1);
+  const list = useRef<DOMElement>(null);
+  useMouse(active, (button, x, y) => {
+    if (!list.current) return;
+    const bounds = measureElement(list.current);
+    if (x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height) return;
+    if ((button & ~29) === 64) {
+      setIndex((value) => Math.max(0, Math.min(ranked.length - 1, value + (button & 1 ? 3 : -3))));
+    } else if (button === 0) {
+      const next = offset + y - bounds.y;
+      if (next < ranked.length) setIndex(next);
+    }
+  });
   useInput(
     (input, key) => {
       if (key.ctrl && input === 'f' && picked) {
@@ -108,7 +121,7 @@ export function PaletteScreen({
               <Text inverse> </Text>
             </Text>
           </Box>
-          <Box flexGrow={1} flexDirection="column" overflow="hidden">
+          <Box ref={list} flexGrow={1} flexDirection="column" overflow="hidden">
             {!ranked.length && (
               <EmptyState title={t('palette.emptyTitle')} detail={t('palette.emptyDetail')} />
             )}

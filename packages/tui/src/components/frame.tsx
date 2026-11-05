@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react';
-import { Box, Text } from 'ink';
+import { useRef, type ReactNode } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
+import { useMouse } from '../hooks/use-mouse.js';
 import { colors } from '../theme.js';
 import { safeText } from '../actions.js';
 import { Feedback, KeyHints, Panel } from './ui.js';
-import { tabForScreen, type Screen } from '../model/navigation.js';
+import { tabForScreen, type Screen, type Tab } from '../model/navigation.js';
 import { t } from '../i18n.js';
 import { LOGO_HEIGHT, LogoMark } from './logo.js';
 export interface Viewport {
@@ -96,7 +97,9 @@ export function Frame({
   notice,
   helpOpen,
   children,
+  onTab,
 }: {
+  onTab: (tab: Tab) => void;
   repository: string;
   directory: string;
   screen: Screen;
@@ -110,6 +113,15 @@ export function Frame({
   children: ReactNode;
 }) {
   const section = tabForScreen(screen);
+  const tabsRef = useRef<Record<string, DOMElement | null>>({});
+  useMouse(!helpOpen, (button, x, y) => {
+    if (button !== 0) return;
+    for (const [name, node] of Object.entries(tabsRef.current)) {
+      if (!node) continue;
+      const b = measureElement(node);
+      if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) onTab(name as Tab);
+    }
+  });
   return (
     <Box width={columns} height={rows} flexDirection="column">
       <Box
@@ -145,8 +157,8 @@ export function Frame({
             ['settings', 'tab.settings', '^G'],
           ] as const
         ).map(([name, label, key]) => (
+          <Box key={name} ref={(node) => { tabsRef.current[name] = node; }}>
           <Text
-            key={name}
             bold={section === name}
             color={section === name ? colors.accent : colors.muted}
             inverse={section === name}
@@ -155,6 +167,7 @@ export function Frame({
             {t(label)}
             {columns >= 80 ? ` ${key}` : ''}{' '}
           </Text>
+          </Box>
         ))}
         <Text color={colors.muted}>{t('tab.hint')}</Text>
       </Box>

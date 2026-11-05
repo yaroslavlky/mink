@@ -1,5 +1,5 @@
 import { useContext, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { Box, Text, measureElement, useInput, useStdin, useStdout, type DOMElement } from 'ink';
+import { Box, Text, measureElement, useInput, useStdin, type DOMElement } from 'ink';
 import { filterLogLines, type LogLine } from '../model/log-buffer.js';
 import { LogInputContext } from './log-input.js';
 import { Input } from './input.js';
@@ -42,7 +42,6 @@ export function LogView({
     : tail;
   const box = useRef<DOMElement>(null);
   const { stdin } = useStdin();
-  const { stdout } = useStdout();
   const wheel = useEffectEvent((button: number, x: number, y: number) => {
     if (editing || !box.current || (button & ~29) !== 64) return;
     const bounds = measureElement(box.current);
@@ -66,9 +65,6 @@ export function LogView({
   });
   useEffect(() => {
     if (!active || !('isTTY' in stdin) || !stdin.isTTY) return;
-    const terminal = 'isTTY' in stdout && stdout.isTTY;
-    // SGR mouse reporting preserves coordinates beyond the legacy 223-column limit.
-    if (terminal) stdout.write('\u001b[?1000h\u001b[?1006h');
     let pending = '';
     const data = (chunk: string | Buffer) => {
       pending += chunk.toString();
@@ -85,9 +81,8 @@ export function LogView({
     stdin.on('data', data);
     return () => {
       stdin.off('data', data);
-      if (terminal) stdout.write('\u001b[?1006l\u001b[?1000l');
     };
-  }, [active, stdin, stdout]);
+  }, [active, stdin]);
   useInput(
     (input, key) => {
       if (editing) {
