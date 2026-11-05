@@ -54,9 +54,11 @@ export function MinkApp({
     [sessionOverrides, setSessionOverrides] = useState(overrides);
   const { stdout } = useStdout();
   useEffect(() => {
-    if (!stdout.isTTY) return;
+    if (!('isTTY' in stdout) || !stdout.isTTY) return;
     stdout.write('\u001b[?1000h\u001b[?1006h');
-    return () => { stdout.write('\u001b[?1006l\u001b[?1000l'); };
+    return () => {
+      stdout.write('\u001b[?1006l\u001b[?1000l');
+    };
   }, [stdout]);
   const commandsScreen = useRef<Screen>('palette');
   const logEditingRef = useRef(false);

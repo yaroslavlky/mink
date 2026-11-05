@@ -39,8 +39,12 @@ export function ServicesScreen({
     if (!list.current || editingRef.current) return;
     const b = measureElement(list.current);
     if (x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height) return;
-    if ((button & ~29) === 64) setIndex((value) => Math.max(0, Math.min(services.length - 1, value + (button & 1 ? 3 : -3))));
-    else if (button === 0 && offsetForMouse + y - b.y < services.length) setIndex(offsetForMouse + y - b.y);
+    if ((button & ~29) === 64)
+      setIndex((value) =>
+        Math.max(0, Math.min(services.length - 1, value + (button & 1 ? 3 : -3))),
+      );
+    else if (button === 0 && offsetForMouse + y - b.y < services.length)
+      setIndex(offsetForMouse + y - b.y);
   });
   useInput(
     (input, key) => {
@@ -79,16 +83,16 @@ export function ServicesScreen({
         meta={<Text color={colors.muted}>{t('services.owned', { count: services.length })}</Text>}
       >
         <Box ref={list} flexDirection="column" flexGrow={1} overflow="hidden">
-        {services.slice(offset, offset + visible).map((owned, row) => (
-          <Text
-            key={owned.instance}
-            backgroundColor={offset + row === selected ? colors.focus : undefined}
-            wrap="truncate"
-          >
-            <Text color={colors.accent}>{offset + row === selected ? '›' : ' '} </Text>
-            <Text bold>{safeText(owned.id)}</Text> <StatusBadge state={owned.state} />
-          </Text>
-        ))}
+          {services.slice(offset, offset + visible).map((owned, row) => (
+            <Text
+              key={owned.instance}
+              backgroundColor={offset + row === selected ? colors.focus : undefined}
+              wrap="truncate"
+            >
+              <Text color={colors.accent}>{offset + row === selected ? '›' : ' '} </Text>
+              <Text bold>{safeText(owned.id)}</Text> <StatusBadge state={owned.state} />
+            </Text>
+          ))}
         </Box>
       </Panel>
       <Panel

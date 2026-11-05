@@ -157,16 +157,21 @@ export function Frame({
             ['settings', 'tab.settings', '^G'],
           ] as const
         ).map(([name, label, key]) => (
-          <Box key={name} ref={(node) => { tabsRef.current[name] = node; }}>
-          <Text
-            bold={section === name}
-            color={section === name ? colors.accent : colors.muted}
-            inverse={section === name}
+          <Box
+            key={name}
+            ref={(node) => {
+              tabsRef.current[name] = node;
+            }}
           >
-            {' '}
-            {t(label)}
-            {columns >= 80 ? ` ${key}` : ''}{' '}
-          </Text>
+            <Text
+              bold={section === name}
+              color={section === name ? colors.accent : colors.muted}
+              inverse={section === name}
+            >
+              {' '}
+              {t(label)}
+              {columns >= 80 ? ` ${key}` : ''}{' '}
+            </Text>
           </Box>
         ))}
         <Text color={colors.muted}>{t('tab.hint')}</Text>

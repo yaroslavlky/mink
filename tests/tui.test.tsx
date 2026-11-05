@@ -239,7 +239,7 @@ it('keeps hidden output and service shortcuts inactive', async () => {
   ui.stdin.write('\t');
   await expect.poll(ui.lastFrame).toContain('SETTINGS');
   ui.stdin.write('\t');
-  await expect.poll(ui.lastFrame).toContain('REVIEW BEFORE EXECUTION');
+  await expect.poll(ui.lastFrame).toContain('Search');
   ui.stdin.write('\u0010');
   await expect.poll(ui.lastFrame).toContain('Search');
   ui.stdin.write('rsk');

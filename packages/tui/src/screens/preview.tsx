@@ -46,7 +46,9 @@ export function PreviewScreen({
     if (!graph.current || (button & ~29) !== 64) return;
     const b = measureElement(graph.current);
     if (x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height) return;
-    setOffset((value) => Math.max(0, Math.min(Math.max(0, rows.length - visible), value + (button & 1 ? 3 : -3))));
+    setOffset((value) =>
+      Math.max(0, Math.min(Math.max(0, rows.length - visible), value + (button & 1 ? 3 : -3))),
+    );
   });
   useInput(
     (input, key) => {

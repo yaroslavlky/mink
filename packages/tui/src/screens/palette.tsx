@@ -42,7 +42,13 @@ export function PaletteScreen({
   useMouse(active, (button, x, y) => {
     if (!list.current) return;
     const bounds = measureElement(list.current);
-    if (x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height) return;
+    if (
+      x < bounds.x ||
+      x >= bounds.x + bounds.width ||
+      y < bounds.y ||
+      y >= bounds.y + bounds.height
+    )
+      return;
     if ((button & ~29) === 64) {
       setIndex((value) => Math.max(0, Math.min(ranked.length - 1, value + (button & 1 ? 3 : -3))));
     } else if (button === 0) {
