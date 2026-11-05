@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useApp, useInput } from 'ink';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useApp, useInput, useStdout } from 'ink';
 import {
   parameterFields,
   redactSecrets,
@@ -52,6 +52,14 @@ export function MinkApp({
     [helpOpen, setHelpOpen] = useState(false),
     [logEditing, setLogEditing] = useState(false),
     [sessionOverrides, setSessionOverrides] = useState(overrides);
+  const { stdout } = useStdout();
+  useEffect(() => {
+    if (!('isTTY' in stdout) || !stdout.isTTY) return;
+    stdout.write('\u001b[?1000h\u001b[?1006h');
+    return () => {
+      stdout.write('\u001b[?1006l\u001b[?1000l');
+    };
+  }, [stdout]);
   const commandsScreen = useRef<Screen>('palette');
   const logEditingRef = useRef(false);
   const changeLogEditing = useCallback((editing: boolean) => {
@@ -99,8 +107,10 @@ export function MinkApp({
     navigate(parameterFields(config.commands[id]).length ? 'form' : 'preview');
   }
   function run(target: Pick<Draft, 'id' | 'values'>, retryFailed?: RunResult) {
-    navigate('output');
     void perform(async () => {
+      mink.plan(target.id, target.values);
+      commandsScreen.current = 'palette';
+      navigate('output');
       await session.start(target.id, target.values, retryFailed);
       await project.reload();
     });
@@ -167,6 +177,7 @@ export function MinkApp({
       value={{ editing: logEditing, editingRef: logEditingRef, setEditing: changeLogEditing }}
     >
       <Frame
+        onTab={(tab) => navigate(tab === 'palette' ? commandsScreen.current : tab)}
         repository={config.repository?.name ?? 'repository control center'}
         directory={mink.directory}
         screen={screen}

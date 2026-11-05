@@ -1,6 +1,7 @@
-import { useContext, useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 import { LogInputContext } from '../components/log-input.js';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, measureElement, useInput, type DOMElement } from 'ink';
+import { useMouse } from '../hooks/use-mouse.js';
 import type { ServiceInfo } from '@yaroslavlky/mink-core';
 import type { LogBuffer } from '../model/log-buffer.js';
 import { Panel, EmptyState, StatusBadge } from '../components/ui.js';
@@ -30,6 +31,21 @@ export function ServicesScreen({
     selected = Math.min(index, Math.max(0, services.length - 1)),
     service = services[selected];
   const { editingRef } = useContext(LogInputContext);
+  const list = useRef<DOMElement>(null);
+  const listHeightForMouse = viewport.wide ? viewport.height : Math.min(7, viewport.height - 6);
+  const visibleForMouse = Math.max(1, listHeightForMouse - 3);
+  const offsetForMouse = Math.max(0, selected - visibleForMouse + 1);
+  useMouse(active, (button, x, y) => {
+    if (!list.current || editingRef.current) return;
+    const b = measureElement(list.current);
+    if (x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height) return;
+    if ((button & ~29) === 64)
+      setIndex((value) =>
+        Math.max(0, Math.min(services.length - 1, value + (button & 1 ? 3 : -3))),
+      );
+    else if (button === 0 && offsetForMouse + y - b.y < services.length)
+      setIndex(offsetForMouse + y - b.y);
+  });
   useInput(
     (input, key) => {
       if (editingRef.current || key.ctrl || key.meta) return;
@@ -66,16 +82,18 @@ export function ServicesScreen({
         height={listHeight}
         meta={<Text color={colors.muted}>{t('services.owned', { count: services.length })}</Text>}
       >
-        {services.slice(offset, offset + visible).map((owned, row) => (
-          <Text
-            key={owned.instance}
-            backgroundColor={offset + row === selected ? colors.focus : undefined}
-            wrap="truncate"
-          >
-            <Text color={colors.accent}>{offset + row === selected ? '›' : ' '} </Text>
-            <Text bold>{safeText(owned.id)}</Text> <StatusBadge state={owned.state} />
-          </Text>
-        ))}
+        <Box ref={list} flexDirection="column" flexGrow={1} overflow="hidden">
+          {services.slice(offset, offset + visible).map((owned, row) => (
+            <Text
+              key={owned.instance}
+              backgroundColor={offset + row === selected ? colors.focus : undefined}
+              wrap="truncate"
+            >
+              <Text color={colors.accent}>{offset + row === selected ? '›' : ' '} </Text>
+              <Text bold>{safeText(owned.id)}</Text> <StatusBadge state={owned.state} />
+            </Text>
+          ))}
+        </Box>
       </Panel>
       <Panel
         title={t('services.output')}

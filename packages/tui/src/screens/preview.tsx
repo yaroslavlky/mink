@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { useRef, useState } from 'react';
+import { Box, Text, measureElement, useInput, type DOMElement } from 'ink';
+import { useMouse } from '../hooks/use-mouse.js';
 import type { ExecutionPlan } from '@yaroslavlky/mink-core';
 import { safeText } from '../actions.js';
 import { commandKind, commandPreview, planRows, type CommandEntry } from '../model/commands.js';
@@ -40,6 +41,15 @@ export function PreviewScreen({
   const headerHeight = entry.kind === 'pipeline' ? 6 : Math.min(10, viewport.height - 5),
     graphHeight = viewport.height - headerHeight;
   const visible = Math.max(1, graphHeight - 4);
+  const graph = useRef<DOMElement>(null);
+  useMouse(active, (button, x, y) => {
+    if (!graph.current || (button & ~29) !== 64) return;
+    const b = measureElement(graph.current);
+    if (x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height) return;
+    setOffset((value) =>
+      Math.max(0, Math.min(Math.max(0, rows.length - visible), value + (button & 1 ? 3 : -3))),
+    );
+  });
   useInput(
     (input, key) => {
       if (key.ctrl || key.meta || key.escape) return;
@@ -101,7 +111,7 @@ export function PreviewScreen({
         height={graphHeight}
         meta={<Text color={colors.muted}>PgUp/PgDn</Text>}
       >
-        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        <Box ref={graph} flexDirection="column" flexGrow={1} overflow="hidden">
           <PipelineSteps rows={rows.slice(offset)} limit={visible} />
         </Box>
         <Text color={colors.muted} wrap="truncate">
